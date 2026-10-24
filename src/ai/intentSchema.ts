@@ -44,7 +44,7 @@ export const ParsedCommandSchema = z.object({
   paymentMode: z.enum(['cash', 'upi', 'udhaar', 'bank']).nullable(),
   date: z.string().nullable().describe('YYYY-MM-DD if a day was mentioned (aaj/kal/parso), else null'),
   period: z.enum(['today', 'yesterday', 'week', 'month']).nullable(),
-  queryType: z.enum(['product', 'low_stock']).nullable(),
+  queryType: z.enum(['product', 'low_stock', 'out_of_stock']).nullable(),
   note: z.string().nullable(),
   confidence: z.number().describe('0 to 1: how sure you are about the intent and values'),
 });

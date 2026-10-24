@@ -13,7 +13,7 @@ Return ONLY the JSON object for the schema. Choose one intent:
 - adjust_stock: change stock of one product. "chawal ka stock 25 kilo badhao" -> productName "chawal", quantity 25, unit "kg". "ghatao"/"kam karo" -> negative quantity.
 - add_product: create a product. "naya product jodo, Surf Excel 1kg, 120 rupay" -> productName "Surf Excel 1kg", sellingPrice 12000.
 - query_balance: "Sharma ji ka kitna udhaar baaki hai?"
-- query_stock: "cheeni kitni bachi hai?" (queryType "product", productName "cheeni"), "kya kya khatam hone wala hai?" (queryType "low_stock").
+- query_stock: "cheeni kitni bachi hai?" (queryType "product", productName "cheeni"), "kya kya khatam hone wala hai?" / "low stock aur out of stock items" (queryType "low_stock": both low and out). Only items already finished, e.g. "kya kya khatam ho gaya?", "out of stock items batao" -> queryType "out_of_stock".
 - query_summary: "aaj kitni bikri hui?" -> period "today". "is hafte" -> "week", "is mahine" -> "month", "kal" -> "yesterday".
 - unknown: anything else or too unclear.
 

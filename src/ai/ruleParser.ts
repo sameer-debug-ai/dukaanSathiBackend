@@ -26,7 +26,7 @@ const has = (text: string, ...words: string[]) => words.some((w) => new RegExp(`
 
 function detectIntent(t: string, hasCustomer: boolean, hasSupplier: boolean, hasProducts: boolean): Intent {
   if (has(t, 'naya product', 'new product', 'product jodo', 'product add')) return 'add_product';
-  if (t.includes('?') || has(t, 'kitna', 'kitni', 'kitne', 'how much', 'kya kya', 'khatam', 'baaki', 'baki', 'bacha', 'bachi')) {
+  if (t.includes('?') || has(t, 'kitna', 'kitni', 'kitne', 'how much', 'kya kya', 'khatam', 'baaki', 'baki', 'bacha', 'bachi', 'batao', 'bataiye', 'dikhao', 'dikhaiye', 'list', 'show')) {
     if (has(t, 'bikri', 'sale', 'sales', 'kamai', 'bika', 'biki')) return 'query_summary';
     if (has(t, 'udhaar', 'udhar', 'baaki', 'baki', 'balance', 'dena') && hasCustomer) return 'query_balance';
     if (has(t, 'stock', 'bachi', 'bacha', 'bache', 'khatam', 'kya kya')) return 'query_stock';
@@ -188,7 +188,12 @@ export function ruleParse(rawText: string, ctx: RuleParserContext): ParsedComman
       cmd.customerName ??= guessName(t);
       break;
     case 'query_stock':
-      cmd.queryType = productHits.length ? 'product' : 'low_stock';
+      // "kya kya khatam ho gaya" = already out; "khatam hone wala" / "low stock" = both lists.
+      cmd.queryType = productHits.length
+        ? 'product'
+        : /out of stock|khatam ho (gaya|gaye|gayi|chuka|chuke)/.test(t) && !has(t, 'low', 'kam')
+          ? 'out_of_stock'
+          : 'low_stock';
       cmd.productName = productHits[0]?.target.name ?? null;
       break;
     case 'query_summary':

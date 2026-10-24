@@ -264,12 +264,12 @@ async function answerQuery(shopId: Types.ObjectId, parsed: ParsedCommand, res: V
     if (match.status === 'ambiguous') {
       res.answer = t(lang, 'Several customers match. Please pick one.', 'कई ग्राहक मिले, एक चुनें।');
       res.needsConfirmation = false;
-      res.answerData = { choose: match.candidates };
+      res.answerData = { kind: 'choose', choose: match.candidates };
       return;
     }
     const c = await Customer.findOne({ _id: match.best.id, shopId }).select('name currentBalance lastTransactionAt');
     if (!c) return;
-    res.answerData = { customerId: String(c._id), balance: c.currentBalance };
+    res.answerData = { kind: 'balance', customerId: String(c._id), name: c.name, balance: c.currentBalance };
     res.answer =
       c.currentBalance > 0
         ? t(lang, `${c.name} owes ${formatInr(c.currentBalance)}.`, `${c.name} का ${formatInr(c.currentBalance)} उधार बाकी है।`)
@@ -281,7 +281,7 @@ async function answerQuery(shopId: Types.ObjectId, parsed: ParsedCommand, res: V
     if (parsed.queryType === 'product' && res.product?.best) {
       const p = data.products.find((x) => x.id === res.product!.best!.id)!;
       const status = stockStatusOf(p.currentStock, p.lowStockThreshold);
-      res.answerData = { productId: p.id, stock: p.currentStock, unit: p.unit, status };
+      res.answerData = { kind: 'stock_item', productId: p.id, name: p.name, stock: p.currentStock, unit: p.unit, status, lowStockThreshold: p.lowStockThreshold };
       res.answer = t(
         lang,
         `${p.name}: ${p.currentStock} ${p.unit} left${status === 'out' ? ' (out of stock)' : status === 'low' ? ' (running low)' : ''}.`,
@@ -289,12 +289,23 @@ async function answerQuery(shopId: Types.ObjectId, parsed: ParsedCommand, res: V
       );
       return;
     }
-    const alerts = await stockAlerts(shopId, 10);
-    res.answerData = { items: alerts.items.map((i) => ({ id: i.id, name: i.name, stock: i.currentStock, unit: i.unit, status: i.stockStatus })) };
-    const names = alerts.items.slice(0, 6).map((i) => `${String(i.name)} (${String(i.currentStock)})`).join(', ');
-    res.answer = alerts.total
-      ? t(lang, `${alerts.total} items are low or out of stock: ${names}.`, `${alerts.total} सामान कम या खत्म हैं: ${names}।`)
-      : t(lang, 'All items are well stocked.', 'सभी सामान का स्टॉक ठीक है।');
+    // The panel shows the full list; the spoken answer is just the counts and a few names.
+    const onlyOut = parsed.queryType === 'out_of_stock';
+    const alerts = await stockAlerts(shopId, 200);
+    const items = alerts.items
+      .filter((i) => !onlyOut || i.stockStatus === 'out')
+      .map((i) => ({ id: i.id, name: i.name, stock: i.currentStock, unit: i.unit, status: i.stockStatus, lowStockThreshold: i.lowStockThreshold }));
+    res.answerData = { kind: 'stock_list', onlyOut, outCount: alerts.outCount, lowCount: alerts.lowCount, items };
+    const names = items.slice(0, 3).map((i) => String(i.name)).join(', ');
+    if (onlyOut) {
+      res.answer = alerts.outCount
+        ? t(lang, `${alerts.outCount} items are out of stock: ${names}${alerts.outCount > 3 ? ' and more' : ''}.`, `${alerts.outCount} सामान खत्म हो गए हैं: ${names}${alerts.outCount > 3 ? ' और भी' : ''}।`)
+        : t(lang, 'Nothing is out of stock.', 'कोई सामान खत्म नहीं हुआ है।');
+    } else {
+      res.answer = alerts.total
+        ? t(lang, `${alerts.outCount} out of stock, ${alerts.lowCount} running low.`, `${alerts.outCount} सामान खत्म, ${alerts.lowCount} कम हैं।`)
+        : t(lang, 'All items are well stocked.', 'सभी सामान का स्टॉक ठीक है।');
+    }
     return;
   }
 
@@ -324,7 +335,7 @@ async function answerQuery(shopId: Types.ObjectId, parsed: ParsedCommand, res: V
     week: t(lang, 'In the last 7 days', 'पिछले 7 दिनों में'),
     month: t(lang, 'In the last 30 days', 'पिछले 30 दिनों में'),
   }[period];
-  res.answerData = { period, from: istDayKey(from), to: istDayKey(parseIstDay(istDayKey(to))), sales: total, bills: count, udhaarGiven: given, paymentsReceived: got };
+  res.answerData = { kind: 'summary', period, from: istDayKey(from), to: istDayKey(parseIstDay(istDayKey(to))), sales: total, bills: count, udhaarGiven: given, paymentsReceived: got };
   res.answer = t(
     lang,
     `${label}: sales ${formatInr(total)} from ${count} bills. Udhaar given ${formatInr(given)}, received ${formatInr(got)}.`,
