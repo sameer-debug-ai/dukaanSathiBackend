@@ -1,0 +1,35 @@
+# Backend only: MongoDB (single-node replica set, for transactions) + the API.
+# The frontend (DukaanSaathiFrontEnd) has its own Dockerfile; see that repo's README.
+services:
+  mongo:
+    image: mongo:7
+    command: ['--replSet', 'rs0', '--bind_ip_all']
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      # Initiates the replica set on first boot, then reports healthy once it is PRIMARY.
+      test: >
+        mongosh --quiet --eval "try { rs.status().ok } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }).ok }"
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+
+  server:
+    build: .
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      MONGODB_URI: mongodb://mongo:27017/dukaansathi?replicaSet=rs0
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - '4000:4000'
+
+volumes:
+  mongo-data:
