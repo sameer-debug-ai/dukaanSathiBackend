@@ -1,4 +1,5 @@
 import Fuse from 'fuse.js';
+import { devanagariToRoman } from './transliterate';
 
 /** Honorifics people add when speaking that should not block a match. */
 const HONORIFICS = /\b(ji|jee|bhaiya|bhaiyya|bhai|bhaisaab|aunty|auntie|uncle|seth|sethji|sahab|saab|saheb|didi|bhabhi|madam|sir|mr|mrs|shri|shree|traders?|store|stores|wale|wala|waale)\b/g;
@@ -60,7 +61,8 @@ export class EntityMatcher {
 
   constructor(targets: MatchTarget[]) {
     this.entries = targets.flatMap((t) =>
-      [t.name, ...t.aliases].map((k) => ({ target: t, key: normalizeName(k), raw: cleanName(k) })).filter((e) => e.key),
+      // Hindi names ("चीनी") also get a Roman key, since the offline parser Romanizes speech.
+      [t.name, ...t.aliases].flatMap((k) => (/[ऀ-ॿ]/.test(k) ? [k, devanagariToRoman(k)] : [k])).map((k) => ({ target: t, key: normalizeName(k), raw: cleanName(k) })).filter((e) => e.key),
     );
     this.fuse = new Fuse(this.entries, { keys: ['key'], includeScore: true, threshold: 0.5, ignoreLocation: true });
   }

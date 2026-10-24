@@ -1,4 +1,5 @@
 import { normalizeSpokenNumbers } from './hindiNumbers';
+import { devanagariToRoman } from './transliterate';
 import { emptyCommand, type Intent, type ParsedCommand, type ParsedItem } from './intentSchema';
 import { HONORIFIC_SUFFIX, type EntityMatcher } from './matcher';
 import { addDays, istDayKey, startOfIstDay } from '../utils/istDate';
@@ -40,8 +41,10 @@ function detectIntent(t: string, hasCustomer: boolean, hasSupplier: boolean, has
   if (has(t, 'becha', 'beche', 'bechi', 'bech', 'sold', 'sale', 'bill')) return 'add_sale';
   if (hasCustomer) {
     if (has(t, 'ne') && has(t, 'diye', 'diya', 'de', 'diye', 'lauta', 'lautaye', 'paid', 'jama')) return 'receive_payment';
-    if (has(t, 'jama', 'payment', 'mila', 'mile', 'wapas', 'received')) return 'receive_payment';
-    if (has(t, 'udhaar', 'udhar', 'saman', 'samaan', 'gaya', 'gaye', 'le gaye', 'liya', 'diya', 'credit', 'khate')) return 'add_credit';
+    if (has(t, 'jama', 'payment', 'mila', 'mile', 'wapas', 'vapas', 'received')) return 'receive_payment';
+    if (has(t, 'udhaar', 'udhar', 'saman', 'samaan', 'gaya', 'gaye', 'le gaye', 'liya', 'diya', 'credit', 'khate', 'khata')) return 'add_credit';
+    // "Sharma ji ke 500 add kar do / jod do / likh do".
+    if (has(t, 'add', 'jod', 'jodo', 'jod do', 'jodna', 'daal', 'dal', 'dalo', 'likh', 'likho', 'likh do', 'chadha', 'chadhao')) return 'add_credit';
   }
   if (has(t, 'udhaar', 'udhar')) return 'add_credit';
   return 'unknown';
@@ -108,7 +111,7 @@ export interface RuleParserContext {
 }
 
 export function ruleParse(rawText: string, ctx: RuleParserContext): ParsedCommand {
-  const text = normalizeSpokenNumbers(rawText).replace(/\s+/g, ' ').trim();
+  const text = normalizeSpokenNumbers(devanagariToRoman(rawText)).replace(/\s+/g, ' ').trim();
   const t = text.toLowerCase();
   const cmd = emptyCommand();
 
@@ -141,7 +144,8 @@ export function ruleParse(rawText: string, ctx: RuleParserContext): ParsedComman
       cmd.customerName ??= guessName(t);
       cmd.amount = money[0] ?? null;
       if (cmd.intent === 'add_credit') cmd.items = items;
-      if (cmd.intent === 'receive_payment' && cmd.amount === null) {
+      // "500 add kar do": no money word, so take the first number spoken.
+      if (cmd.amount === null && !(cmd.intent === 'add_credit' && items.length)) {
         const n = t.match(/(\d+(?:\.\d+)?)/);
         if (n) cmd.amount = Math.round(Number(n[1]) * 100);
       }

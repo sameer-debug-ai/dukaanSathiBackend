@@ -29,7 +29,7 @@ const FRACTIONS: Record<string, number> = {
 
 /** Prefix modifiers: "saade teen" = 3.5, "sawa do" = 2.25, "paune teen" = 2.75. */
 const PREFIX: Record<string, number> = {
-  saade: 0.5, sade: 0.5, saadhe: 0.5, 'साढ़े': 0.5, 'साढे': 0.5,
+  saade: 0.5, sade: 0.5, saadhe: 0.5, sarhe: 0.5, 'साढ़े': 0.5, 'साढे': 0.5,
   sawa: 0.25, sava: 0.25, 'सवा': 0.25,
   paune: -0.25, 'पौने': -0.25,
 };
