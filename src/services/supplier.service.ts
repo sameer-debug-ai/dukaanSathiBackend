@@ -6,7 +6,7 @@ import { Supplier } from '../models/supplier.model';
 import { SupplierPayment } from '../models/supplierPayment.model';
 import { AppError } from '../utils/AppError';
 import { resolveRange } from '../utils/istDate';
-import { lineTotal } from '../utils/money';
+import { formatInr, lineTotal } from '../utils/money';
 import { escapeRegex, getPageParams, pageMeta } from '../utils/pagination';
 import type {
   CreatePurchaseInput,
@@ -100,8 +100,12 @@ export async function updateSupplier(shopId: Types.ObjectId, id: string, input: 
 }
 
 export async function deleteSupplier(shopId: Types.ObjectId, id: string) {
-  const doc = await Supplier.findOneAndUpdate({ _id: id, shopId, isDeleted: false }, { isDeleted: true }, { new: true });
-  if (!doc) throw AppError.notFound('Supplier not found');
+  // Deleting a supplier you still owe would drop that due from every total.
+  const doc = await Supplier.findOneAndUpdate({ _id: id, shopId, isDeleted: false, currentPayable: 0 }, { isDeleted: true }, { new: true });
+  if (doc) return;
+  const existing = await Supplier.findOne({ _id: id, shopId, isDeleted: false }).select('name currentPayable');
+  if (!existing) throw AppError.notFound('Supplier not found');
+  throw new AppError(409, `${existing.name} still has ${formatInr(existing.currentPayable)} due. Settle it before deleting.`);
 }
 
 /** Purchases and payments merged chronologically with a running payable balance. */
@@ -120,7 +124,7 @@ export async function supplierHistory(shopId: Types.ObjectId, id: string) {
       amount: p.totalAmount,
       paid: p.paidAmount,
       due: p.dueAmount,
-      description: `${p.items.length} item(s)${p.invoiceNumber ? ` Â· Inv ${p.invoiceNumber}` : ''}`,
+      description: `${p.items.length} item(s)${p.invoiceNumber ? ` · Inv ${p.invoiceNumber}` : ''}`,
       ref: p.toJSON(),
     })),
     ...payments.map((p) => ({
@@ -130,7 +134,7 @@ export async function supplierHistory(shopId: Types.ObjectId, id: string) {
       amount: p.amount,
       paid: p.amount,
       due: -p.amount,
-      description: `Payment (${p.mode})${p.note ? ` Â· ${p.note}` : ''}`,
+      description: `Payment (${p.mode})${p.note ? ` · ${p.note}` : ''}`,
       ref: p.toJSON(),
     })),
   ].sort((a, b) => a.date.getTime() - b.date.getTime());
@@ -260,12 +264,17 @@ export async function getPurchase(shopId: Types.ObjectId, id: string) {
 export async function createSupplierPayment(shopId: Types.ObjectId, input: CreateSupplierPaymentInput) {
   return runInTransaction(async (session) => {
     const date = input.date ?? new Date();
+    // Same rule as purchases (paid can't exceed the bill): never pay more than is due.
     const supplier = await Supplier.findOneAndUpdate(
-      { _id: input.supplierId, shopId, isDeleted: false },
+      { _id: input.supplierId, shopId, isDeleted: false, currentPayable: { $gte: input.amount } },
       { $inc: { currentPayable: -input.amount }, $max: { lastTransactionAt: date } },
       { new: true, session },
     );
-    if (!supplier) throw AppError.notFound('Supplier not found');
+    if (!supplier) {
+      const existing = await Supplier.findOne({ _id: input.supplierId, shopId, isDeleted: false }).select('name currentPayable').session(session ?? null);
+      if (!existing) throw AppError.notFound('Supplier not found');
+      throw AppError.badRequest(`Only ${formatInr(Math.max(0, existing.currentPayable))} is due to ${existing.name}. Payment cannot be more than that.`);
+    }
     const [payment] = await SupplierPayment.create([{ ...input, date, shopId }], { session });
     return { payment: payment!.toJSON(), supplier: supplier.toJSON() };
   });

@@ -1,7 +1,7 @@
 import { normalizeSpokenNumbers } from './hindiNumbers';
 import { devanagariToRoman } from './transliterate';
 import { emptyCommand, type Intent, type ParsedCommand, type ParsedItem } from './intentSchema';
-import { HONORIFIC_SUFFIX, type EntityMatcher } from './matcher';
+import { HONORIFIC_SUFFIX, normalizeName, type EntityMatcher } from './matcher';
 import { addDays, istDayKey, startOfIstDay } from '../utils/istDate';
 
 /**
@@ -26,7 +26,10 @@ const has = (text: string, ...words: string[]) => words.some((w) => new RegExp(`
 
 function detectIntent(t: string, hasCustomer: boolean, hasSupplier: boolean, hasProducts: boolean): Intent {
   if (has(t, 'naya product', 'new product', 'product jodo', 'product add')) return 'add_product';
-  if (t.includes('?') || has(t, 'kitna', 'kitni', 'kitne', 'how much', 'kya kya', 'khatam', 'baaki', 'baki', 'bacha', 'bachi', 'batao', 'bataiye', 'dikhao', 'dikhaiye', 'list', 'show')) {
+  if (
+    t.includes('?') ||
+    has(t, 'kitna', 'kitni', 'kitne', 'how much', 'kya kya', 'kaun', 'kaunse', 'kaun se', 'konsa', 'konse', 'which', 'what', 'khatam', 'baaki', 'baki', 'bacha', 'bachi', 'batao', 'bataiye', 'dikhao', 'dikhaiye', 'list', 'show')
+  ) {
     if (has(t, 'bikri', 'sale', 'sales', 'kamai', 'bika', 'biki')) return 'query_summary';
     if (has(t, 'udhaar', 'udhar', 'baaki', 'baki', 'balance', 'dena') && hasCustomer) return 'query_balance';
     if (has(t, 'stock', 'bachi', 'bacha', 'bache', 'khatam', 'kya kya')) return 'query_stock';
@@ -38,12 +41,13 @@ function detectIntent(t: string, hasCustomer: boolean, hasSupplier: boolean, has
     if (has(t, 'liya', 'liye', 'li', 'kharida', 'kharide', 'mangaya', 'aaya', 'aya', 'purchase', 'bought')) return 'add_purchase';
     if (has(t, 'diye', 'diya', 'de', 'payment', 'paid', 'chukaya', 'chukta', 'bheje', 'clear', 'settle')) return 'supplier_payment';
   }
-  if (has(t, 'becha', 'beche', 'bechi', 'bech', 'sold', 'sale', 'bill')) return 'add_sale';
+  // "becha" = I sold; "bika / bike / biki" = got sold ("aaj 45 doodh bike").
+  if (has(t, 'becha', 'beche', 'bechi', 'bech', 'bika', 'bike', 'biki', 'bik gaye', 'bik gaya', 'sold', 'sale', 'bill')) return 'add_sale';
   if (hasCustomer) {
     // "Sharma ji ka sara udhaar clear / chukta ho gaya": a full payment, not more udhaar.
     if (isFullSettlement(t) && (has(t, 'ne') || has(t, ...CLEARED))) return 'receive_payment';
     if (has(t, 'ne') && has(t, 'diye', 'diya', 'de', 'diye', 'lauta', 'lautaye', 'paid', 'jama')) return 'receive_payment';
-    if (has(t, 'jama', 'payment', 'mila', 'mile', 'wapas', 'vapas', 'received')) return 'receive_payment';
+    if (has(t, 'jama', 'payment', 'mila', 'mile', 'wapas', 'vapas', 'received', 'paid', 'gave', 'returned')) return 'receive_payment';
     if (has(t, 'udhaar', 'udhar', 'saman', 'samaan', 'gaya', 'gaye', 'le gaye', 'liya', 'diya', 'credit', 'khate', 'khata')) return 'add_credit';
     // "Sharma ji ke 500 add kar do / jod do / likh do".
     if (has(t, 'add', 'jod', 'jodo', 'jod do', 'jodna', 'daal', 'dal', 'dalo', 'likh', 'likho', 'likh do', 'chadha', 'chadhao')) return 'add_credit';
@@ -146,6 +150,12 @@ export function ruleParse(rawText: string, ctx: RuleParserContext): ParsedComman
     return titleCase(key + (suffix ? ` ${suffix[1]}` : ''));
   };
   cmd.customerName = customerHits[0] ? spoken(customerHits[0].key) : null;
+  // "Anil Gupta ne ... udhaar liya" mentions "gupta" (Gupta ji's key) but names someone else:
+  // when the spoken name has more words than the known key, keep the full spoken name.
+  const guessed = guessName(t);
+  if (customerHits[0] && guessed && normalizeName(guessed) !== customerHits[0].key && ` ${normalizeName(guessed)} `.includes(` ${customerHits[0].key} `)) {
+    cmd.customerName = guessed;
+  }
   cmd.supplierName = supplierHits[0] ? spoken(supplierHits[0].key) : null;
 
   const money = moneyMentions(t);
@@ -204,7 +214,7 @@ export function ruleParse(rawText: string, ctx: RuleParserContext): ParsedComman
       // "kya kya khatam ho gaya" = already out; "khatam hone wala" / "low stock" = both lists.
       cmd.queryType = productHits.length
         ? 'product'
-        : /out of stock|khatam ho (gaya|gaye|gayi|chuka|chuke)/.test(t) && !has(t, 'low', 'kam')
+        : /out of stock|khatam ho (gaya|gaye|gayi|chuka|chuke)/.test(t) && !has(t, 'low', 'kam') && !/(^|\s)lo stock/.test(t)
           ? 'out_of_stock'
           : 'low_stock';
       cmd.productName = productHits[0]?.target.name ?? null;

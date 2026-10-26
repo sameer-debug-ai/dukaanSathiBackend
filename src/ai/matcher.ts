@@ -59,7 +59,11 @@ export class EntityMatcher {
   private readonly fuse: Fuse<{ target: MatchTarget; key: string; raw: string }>;
   private readonly entries: { target: MatchTarget; key: string; raw: string }[];
 
-  constructor(targets: MatchTarget[]) {
+  /** `people`: customers/suppliers, where an extra spoken word usually means a different person. */
+  constructor(
+    targets: MatchTarget[],
+    private readonly people = false,
+  ) {
     this.entries = targets.flatMap((t) =>
       // Hindi names ("चीनी") also get a Roman key, since the offline parser Romanizes speech.
       [t.name, ...t.aliases].flatMap((k) => (/[ऀ-ॿ]/.test(k) ? [k, devanagariToRoman(k)] : [k])).map((k) => ({ target: t, key: normalizeName(k), raw: cleanName(k) })).filter((e) => e.key),
@@ -101,7 +105,10 @@ export class EntityMatcher {
       // honorific ("Sharma") are strong but can tie with another customer's surname.
       if (e.raw === rawQ) keep(e.target, 1);
       else if (e.key === q) keep(e.target, 0.9);
-      else if (q.length >= 3 && (` ${e.key} `.includes(` ${q} `) || ` ${q} `.includes(` ${e.key} `))) keep(e.target, 0.85);
+      else if (q.length >= 3 && ` ${e.key} `.includes(` ${q} `)) keep(e.target, 0.85);
+      // The spoken name has extra words. For products that is just description ("sarson ka tel");
+      // for people it is usually a different person ("Anil Gupta" is not "Gupta ji"), so only suggest.
+      else if (q.length >= 3 && ` ${q} `.includes(` ${e.key} `)) keep(e.target, this.people ? 0.7 : 0.85);
     }
     // Fuzzy-only hits (speech noise like "sarma") are capped so they never outrank an exact/whole-word hit.
     for (const r of this.fuse.search(q, { limit: 8 })) keep(r.item.target, Math.min(AUTO_ACCEPT, 1 - (r.score ?? 1)));

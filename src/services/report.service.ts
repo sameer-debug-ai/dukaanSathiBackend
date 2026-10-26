@@ -49,7 +49,9 @@ export async function salesReport(shopId: Types.ObjectId, q: ReportRange): Promi
         bills: { $sum: 1 },
         total: { $sum: '$totalAmount' },
         discount: { $sum: '$discount' },
-        cash: { $sum: { $cond: [{ $eq: ['$paymentMode', 'cash'] }, '$paidAmount', 0] } },
+        // Money taken at the counter on a part-paid bill is cash too; leaving it out made
+        // cash + UPI + udhaar fall short of the total.
+        cash: { $sum: { $cond: [{ $in: ['$paymentMode', ['cash', 'partial']] }, '$paidAmount', 0] } },
         upi: { $sum: { $cond: [{ $eq: ['$paymentMode', 'upi'] }, '$paidAmount', 0] } },
         credit: { $sum: '$creditAmount' },
       },

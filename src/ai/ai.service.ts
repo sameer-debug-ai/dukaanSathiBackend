@@ -143,8 +143,8 @@ export async function parseVoiceCommand(shopId: Types.ObjectId, rawText: string,
   const text = rawText.trim().slice(0, 500);
   const data = await loadShopData(shopId);
   const matchers = {
-    customers: new EntityMatcher(data.customers),
-    suppliers: new EntityMatcher(data.suppliers),
+    customers: new EntityMatcher(data.customers, true),
+    suppliers: new EntityMatcher(data.suppliers, true),
     products: new EntityMatcher(data.products),
   };
 

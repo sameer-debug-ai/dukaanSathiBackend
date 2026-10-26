@@ -97,6 +97,18 @@ describe('EntityMatcher', () => {
   it('returns not_found for unknown names', () => {
     expect(customers.match('Chaurasia').status).toBe('not_found');
   });
+
+  it('a different first name is not auto-matched to a surname alias (people)', () => {
+    const people = new EntityMatcher([{ id: 'g', name: 'Gupta ji', aliases: [] }], true);
+    expect(people.match('Anil Gupta').status).not.toBe('matched');
+    expect(people.match('अनिल गुप्ता').status).not.toBe('matched');
+    expect(people.match('Gupta ji').status).toBe('matched');
+  });
+
+  it('extra descriptive words still match a product', () => {
+    const products = new EntityMatcher([{ id: 'o', name: 'Mustard Oil', aliases: ['tel'] }]);
+    expect(products.match('sarson ka tel')).toMatchObject({ status: 'matched', best: { id: 'o' } });
+  });
 });
 
 describe('ruleParse (offline fallback)', () => {
@@ -190,6 +202,21 @@ describe('ruleParse (offline fallback)', () => {
     // A partial payment or a plain credit is not a settlement.
     expect(ruleParse('Sharma ji ne 300 rupay de diye', ctx)).toMatchObject({ intent: 'receive_payment', settleFull: false, amount: 30000 });
     expect(ruleParse('Sharma ji ke udhaar me 500 add kar do', ctx)).toMatchObject({ intent: 'add_credit', settleFull: false });
+  });
+
+  it('offline: a new person with a known surname is not booked to that customer', () => {
+    const c = ruleParse('अनिल गुप्ता ने ₹12000 का उधार लिया', { ...ctx, customers: new EntityMatcher([{ id: 'g', name: 'Gupta ji', aliases: [] }], true) });
+    expect(c).toMatchObject({ intent: 'add_credit', customerName: 'Anil Gupta', amount: 1200000 });
+  });
+
+  it('offline: "kaun kaun se ... low stock" is a stock question; "bike" is a sale', () => {
+    expect(ruleParse('कौन कौन से आइटम लो स्टॉक और आउट ऑफ स्टॉक हैं', ctx)).toMatchObject({ intent: 'query_stock', queryType: 'low_stock' });
+    expect(ruleParse('which items are out of stock', ctx)).toMatchObject({ intent: 'query_stock', queryType: 'out_of_stock' });
+    expect(ruleParse('aaj 2 packet maggi bike', ctx)).toMatchObject({ intent: 'add_sale' });
+  });
+
+  it('offline: English "X paid 2000 rupees" is a payment', () => {
+    expect(ruleParse('Sharma ji paid 2000 rupees', ctx)).toMatchObject({ intent: 'receive_payment', amount: 200000 });
   });
 
   it('Devanagari speech', () => {

@@ -5,10 +5,12 @@ import { CustomerLedger } from '../models/customerLedger.model';
 import { Product } from '../models/product.model';
 import { StockMovement } from '../models/stockMovement.model';
 import { User } from '../models/user.model';
-import { addPayment, createCustomer } from '../services/customer.service';
+import { addCredit, addPayment, createCustomer, deleteCustomer } from '../services/customer.service';
 import { recalculateBalance } from '../services/ledger.service';
-import { adjustStock, createProduct } from '../services/product.service';
+import { adjustStock, createProduct, importProducts } from '../services/product.service';
 import { createSale } from '../services/sale.service';
+import { createPurchase, createSupplier, createSupplierPayment, deleteSupplier } from '../services/supplier.service';
+import { importProductsSchema } from '../validators/product.validators';
 
 /** Exercises the real services against an in-memory replica set (transactions on). */
 describe('sale -> stock + udhaar (integration)', () => {
@@ -103,5 +105,31 @@ describe('sale -> stock + udhaar (integration)', () => {
     const other = await User.create({ name: 'Other', phone: '9000000098', passwordHash: 'x', shopName: 'Other Shop' });
     expect(await Product.countDocuments({ shopId: other._id })).toBe(0);
     expect(await Product.countDocuments({ shopId })).toBeGreaterThan(0);
+  });
+
+  it('import updating a price keeps the product’s aliases, Hindi name, category and cost', async () => {
+    const { rows } = importProductsSchema.parse({ rows: [{ name: 'Sugar', sellingPrice: 4700 }] });
+    const res = await importProducts(shopId, { rows, updateExisting: true });
+    expect(res).toMatchObject({ created: 0, updated: 1, failed: 0 });
+    const p = await Product.findOne({ shopId, name: 'Sugar' });
+    expect(p).toMatchObject({ sellingPrice: 4700, purchasePrice: 4000, category: 'Grocery', unit: 'kg' });
+    expect(p?.aliases).toEqual(['cheeni']);
+  });
+
+  it('cannot delete a customer who still owes udhaar', async () => {
+    const c = await createCustomer(shopId, { name: 'Owes Money', aliases: [], phone: '', address: '' });
+    await addCredit(shopId, String(c._id), { amount: 5000, items: [], note: '', source: 'manual' });
+    await expect(deleteCustomer(shopId, String(c._id))).rejects.toMatchObject({ statusCode: 409 });
+    await addPayment(shopId, String(c._id), { amount: 5000, mode: 'cash', note: '', source: 'manual' });
+    await expect(deleteCustomer(shopId, String(c._id))).resolves.toBeUndefined();
+  });
+
+  it('supplier payment cannot exceed what is due', async () => {
+    const s = await createSupplier(shopId, { name: 'Test Traders', aliases: [], phone: '', company: '', address: '', gstNumber: '' });
+    const salt = await createProduct(shopId, { name: 'Salt', nameHindi: '', aliases: [], category: 'Grocery', unit: 'packet', purchasePrice: 2000, sellingPrice: 2500, mrp: 0, openingStock: 0, isActive: true });
+    await createPurchase(shopId, { supplierId: String(s._id), items: [{ productId: String(salt._id), qty: 5, rate: 2000 }], paidAmount: 0, paymentMode: 'cash', invoiceNumber: '', note: '', updatePurchasePrice: true, source: 'manual' });
+    await expect(createSupplierPayment(shopId, { supplierId: String(s._id), amount: 20000, mode: 'cash', note: '', source: 'manual' })).rejects.toMatchObject({ statusCode: 400 });
+    await createSupplierPayment(shopId, { supplierId: String(s._id), amount: 10000, mode: 'cash', note: '', source: 'manual' });
+    await expect(deleteSupplier(shopId, String(s._id))).resolves.toBeUndefined();
   });
 });

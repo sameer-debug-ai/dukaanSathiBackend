@@ -7,8 +7,10 @@ import { User } from './models/user.model';
 async function main(): Promise<void> {
   await connectDb();
 
-  // Only seeds an empty database, so real shop data is never touched.
-  if (env.AUTO_SEED && (await User.estimatedDocumentCount()) === 0) {
+  // Only seeds an empty database, so real shop data is never touched. Never in production:
+  // the demo shop has a published login (9876543210 / demo123).
+  if (env.AUTO_SEED && env.isProd) logger.warn('AUTO_SEED is ignored in production');
+  if (env.AUTO_SEED && !env.isProd && (await User.estimatedDocumentCount()) === 0) {
     try {
       const { seedDemoShop } = await import('./scripts/seedData');
       await seedDemoShop();

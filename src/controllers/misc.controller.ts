@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { aiEngineStatus, listVoiceLogs, parseVoiceCommand, updateVoiceLog } from '../ai/ai.service';
+import { env } from '../config/env';
 import { shopIdOf } from '../middlewares/auth';
 import { dashboardCharts, dashboardSummary } from '../services/dashboard.service';
 import { REPORTS, reportToCsv, type ReportName } from '../services/report.service';
@@ -85,6 +86,8 @@ export async function backup(req: Request, res: Response) {
   return res.send(JSON.stringify(data, null, 2));
 }
 export async function sampleData(req: Request, res: Response) {
+  // Demo products/customers are for trying the app locally, never for a live shop.
+  if (env.isProd) throw new AppError(403, 'Sample data is not available on this server');
   return created(res, await loadSampleData(shopIdOf(req)), 'Sample data loaded');
 }
 export async function dataCounts(req: Request, res: Response) {

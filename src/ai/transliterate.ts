@@ -38,6 +38,9 @@ const LOANWORDS: Record<string, string> = {
   jor: 'jod', joro: 'jodo', jore: 'jode', jorna: 'jodna',
   stok: 'stock', bil: 'bill', sel: 'sale', pement: 'payment', bailens: 'balance', kredit: 'credit',
   khatm: 'khatam', kliyar: 'clear', klier: 'clear', setal: 'settle', ful: 'full', prodakt: 'product', prodkt: 'product', yupiai: 'upi', onlain: 'online', kesh: 'cash', kaish: 'cash',
+  aut: 'out', oph: 'of', aitam: 'item', aitams: 'items', paiket: 'packet', paket: 'packet', bred: 'bread', litar: 'litre',
+  // Common Hinglish spellings, so they match how products/aliases are usually typed.
+  aj: 'aaj', dudh: 'doodh', chini: 'cheeni', chaval: 'chawal', ata: 'aata',
 };
 
 interface Unit {

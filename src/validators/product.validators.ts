@@ -31,13 +31,16 @@ export const productListQuery = listQuery.extend({
   stock: z.enum(['all', 'in', 'low', 'out', 'alerts']).optional(),
 });
 
+/** A full new-product row from an import file (defaults applied). */
+export const importRowCreateSchema = createProductSchema.extend({
+  sellingPrice: paise.default(0),
+});
+
 export const importProductsSchema = z.object({
+  // No defaults at this stage: a row that updates an existing product must only touch
+  // the columns the file actually has, not reset aliases / Hindi name / cost to blanks.
   rows: z
-    .array(
-      createProductSchema.extend({
-        sellingPrice: paise.default(0),
-      }),
-    )
+    .array(importRowCreateSchema.partial().extend({ name: importRowCreateSchema.shape.name }))
     .min(1, 'No rows to import')
     .max(2000, 'Import at most 2000 rows at a time'),
   /** When true, rows matching an existing product name update its prices instead of creating a duplicate. */

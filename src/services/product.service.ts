@@ -4,12 +4,13 @@ import { Product } from '../models/product.model';
 import { User } from '../models/user.model';
 import { AppError } from '../utils/AppError';
 import { escapeRegex, getPageParams, pageMeta } from '../utils/pagination';
-import type {
-  AdjustStockInput,
-  CreateProductInput,
-  ImportProductsInput,
-  ProductListQuery,
-  UpdateProductInput,
+import {
+  importRowCreateSchema,
+  type AdjustStockInput,
+  type CreateProductInput,
+  type ImportProductsInput,
+  type ProductListQuery,
+  type UpdateProductInput,
 } from '../validators/product.validators';
 import { applyStockChange } from './stock.service';
 
@@ -152,14 +153,17 @@ export async function importProducts(shopId: Types.ObjectId, input: ImportProduc
         ? await Product.findOne({ shopId, isDeleted: false, name: new RegExp(`^${escapeRegex(row.name)}$`, 'i') })
         : null;
       if (existing) {
-        const { openingStock, ...fields } = row;
-        await Product.updateOne({ _id: existing._id, shopId }, { $set: fields });
-        if (openingStock > 0) {
+        // Only the columns present in the file; blank cells leave the product as it is.
+        const { openingStock, ...given } = row;
+        const fields = Object.fromEntries(Object.entries(given).filter(([, v]) => v !== undefined && !(Array.isArray(v) && v.length === 0)));
+        if (Object.keys(fields).length) await Product.updateOne({ _id: existing._id, shopId }, { $set: fields });
+        if (openingStock && openingStock > 0) {
           await applyStockChange({ shopId, productId: existing._id, quantity: openingStock, type: 'purchase', note: 'CSV import', userId });
         }
         updated++;
       } else {
-        await createProduct(shopId, { ...row, lowStockThreshold: row.lowStockThreshold ?? threshold }, userId);
+        const full = importRowCreateSchema.parse(row);
+        await createProduct(shopId, { ...full, lowStockThreshold: full.lowStockThreshold ?? threshold }, userId);
         created++;
       }
     } catch (err) {

@@ -4,6 +4,7 @@ import { Customer } from '../models/customer.model';
 import { CustomerLedger } from '../models/customerLedger.model';
 import { AppError } from '../utils/AppError';
 import { resolveRange } from '../utils/istDate';
+import { formatInr } from '../utils/money';
 import { escapeRegex, getPageParams, pageMeta } from '../utils/pagination';
 import type {
   AddCreditInput,
@@ -91,8 +92,17 @@ export async function updateCustomer(shopId: Types.ObjectId, id: string, input: 
 }
 
 export async function deleteCustomer(shopId: Types.ObjectId, id: string) {
-  const doc = await Customer.findOneAndUpdate({ _id: id, shopId, isDeleted: false }, { isDeleted: true }, { new: true });
-  if (!doc) throw AppError.notFound('Customer not found');
+  // Deleting someone with pending udhaar (or an advance) would silently drop it from every total.
+  const doc = await Customer.findOneAndUpdate({ _id: id, shopId, isDeleted: false, currentBalance: 0 }, { isDeleted: true }, { new: true });
+  if (doc) return;
+  const existing = await Customer.findOne({ _id: id, shopId, isDeleted: false }).select('name currentBalance');
+  if (!existing) throw AppError.notFound('Customer not found');
+  throw new AppError(
+    409,
+    existing.currentBalance > 0
+      ? `${existing.name} still owes ${formatInr(existing.currentBalance)}. Clear the udhaar before deleting.`
+      : `${existing.name} has an advance of ${formatInr(-existing.currentBalance)}. Settle it before deleting.`,
+  );
 }
 
 /** Full ledger with running balance. With a date range, the opening balance carries prior entries. */
