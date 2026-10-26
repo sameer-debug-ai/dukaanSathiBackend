@@ -215,6 +215,14 @@ describe('ruleParse (offline fallback)', () => {
     expect(ruleParse('aaj 2 packet maggi bike', ctx)).toMatchObject({ intent: 'add_sale' });
   });
 
+  it('offline: undo phrases (Hinglish + Devanagari) and look-alikes that are not undo', () => {
+    for (const s of ['galti ho gayi', 'pichhla wala hatao', 'undo karo', 'cancel karo', 'गलती हो गई', 'पिछला वाला हटाओ', 'कैंसल करो', 'last entry delete karo']) {
+      expect(ruleParse(s, ctx).intent).toBe('undo_last');
+    }
+    expect(ruleParse('Sharma ji ke 500 rupay udhaar likh do', ctx).intent).toBe('add_credit');
+    expect(ruleParse('cheeni ka stock 5 kilo kam karo', ctx).intent).toBe('adjust_stock');
+  });
+
   it('offline: English "X paid 2000 rupees" is a payment', () => {
     expect(ruleParse('Sharma ji paid 2000 rupees', ctx)).toMatchObject({ intent: 'receive_payment', amount: 200000 });
   });

@@ -8,6 +8,8 @@ let transactionsSupported = false;
 
 /** True when the server is running against the throwaway in-memory replica set. */
 export const isMemoryDb = (): boolean => memoryServer !== null;
+/** False on a standalone mongod: multi-document writes then cannot roll back. */
+export const transactionsEnabled = (): boolean => transactionsSupported;
 
 export async function connectDb(uri: string = env.MONGODB_URI): Promise<void> {
   let connectionUri = uri;

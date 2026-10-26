@@ -12,6 +12,7 @@ import type { CreateSaleInput, SaleListQuery } from '../validators/sale.validato
 import { addLedgerEntry } from './ledger.service';
 import { attachRef } from './lookup';
 import { applyStockChange, round3 } from './stock.service';
+import { recordVoiceEffect } from './voiceEffects';
 
 /** Splits a bill total into paid now vs. added to udhaar. Pure for testing. */
 export function splitPayment(mode: SalePaymentMode, total: number, paidInput?: number): { paid: number; credit: number } {
@@ -133,6 +134,7 @@ export async function createSale(shopId: Types.ObjectId, input: CreateSaleInput,
     } else if (customer) {
       await Customer.updateOne({ _id: customer._id, shopId }, { $max: { lastTransactionAt: date } }, { session });
     }
+    await recordVoiceEffect(shopId, input.voiceLogId, [{ kind: 'sale', id: saleId }], session);
 
     return { ...sale!.toJSON(), warnings: shortages.length ? shortages : undefined };
   });

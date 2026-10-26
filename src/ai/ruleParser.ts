@@ -24,7 +24,12 @@ const UNIT_WORDS: Record<string, ParsedItem['unit']> = {
 
 const has = (text: string, ...words: string[]) => words.some((w) => new RegExp(`(^|\\s)${w}(\\s|$|\\?)`, 'i').test(text));
 
+/** "galti ho gayi", "pichhla wala hatao", "undo karo", "cancel karo": reverse the last voice entry. */
+const UNDO_RX =
+  /(^|\s)(galti (ho gayi|ho gai|hui|ho gaya)|undo|pichh?l[aie] ([wv]al[ai]|entr[yi]) (hatao|hata do|delete|cancel)|(last|pichh?li) entr[yi] (hatao|hata do|delete|cancel)|cancel (karo|kar do|kardo|kr do|krdo))(\s|$|\.|!)/;
+
 function detectIntent(t: string, hasCustomer: boolean, hasSupplier: boolean, hasProducts: boolean): Intent {
+  if (UNDO_RX.test(t)) return 'undo_last';
   if (has(t, 'naya product', 'new product', 'product jodo', 'product add')) return 'add_product';
   if (
     t.includes('?') ||

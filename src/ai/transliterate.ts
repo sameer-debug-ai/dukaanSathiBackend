@@ -41,6 +41,7 @@ const LOANWORDS: Record<string, string> = {
   aut: 'out', oph: 'of', aitam: 'item', aitams: 'items', paiket: 'packet', paket: 'packet', bred: 'bread', litar: 'litre',
   // Common Hinglish spellings, so they match how products/aliases are usually typed.
   aj: 'aaj', dudh: 'doodh', chini: 'cheeni', chaval: 'chawal', ata: 'aata',
+  kainsal: 'cancel', kaisal: 'cancel', kensal: 'cancel', andu: 'undo', anadu: 'undo', dilit: 'delete', diliit: 'delete', laist: 'last', lasat: 'last'
 };
 
 interface Unit {

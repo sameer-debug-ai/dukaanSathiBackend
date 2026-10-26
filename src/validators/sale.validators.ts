@@ -23,6 +23,8 @@ export const createSaleSchema = z.object({
   /** Sell even if stock would go negative (only when the shop setting allows it). */
   allowOversell: z.boolean().default(false),
   source: z.enum(['manual', 'voice']).default('manual'),
+  /** Set when the voice assistant saves this; lets the entry be undone. */
+  voiceLogId: objectId.optional(),
 });
 
 export const saleListQuery = listQuery.merge(dateRangeQuery).extend({

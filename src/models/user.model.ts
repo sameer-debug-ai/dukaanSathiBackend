@@ -10,6 +10,12 @@ const shopSettingsSchema = new Schema(
     lowStockDefault: { type: Number, default: 5, min: 0 },
     allowOversell: { type: Boolean, default: false },
     darkMode: { type: Boolean, default: false },
+    /** "Hamesha save se pehle poochho": always show the confirmation card (no voice auto-save). */
+    voiceAlwaysConfirm: { type: Boolean, default: true },
+    /** Auto-save a voice command only at or above this confidence (0-1). */
+    voiceAutoSaveThreshold: { type: Number, default: 0.85, min: 0.5, max: 1 },
+    /** How long a saved voice entry can be undone. */
+    voiceUndoSeconds: { type: Number, default: 60, min: 10, max: 600 },
   },
   { _id: false },
 );

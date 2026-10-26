@@ -1,7 +1,8 @@
 import { Schema, model, type InferSchemaType } from 'mongoose';
 import { tenantModel } from './plugins';
 
-export const MOVEMENT_TYPES = ['purchase', 'sale', 'adjustment', 'return', 'damage'] as const;
+/** 'reversal' = undoing a voice entry; it puts stock back exactly as it was. */
+export const MOVEMENT_TYPES = ['purchase', 'sale', 'adjustment', 'return', 'damage', 'reversal'] as const;
 export type MovementType = (typeof MOVEMENT_TYPES)[number];
 
 const stockMovementSchema = new Schema(

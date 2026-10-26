@@ -54,6 +54,8 @@ export const createPurchaseSchema = z.object({
   /** Also update each product's purchase price to this rate. */
   updatePurchasePrice: z.boolean().default(true),
   source: z.enum(['manual', 'voice']).default('manual'),
+  /** Set when the voice assistant saves this; lets the entry be undone. */
+  voiceLogId: objectId.optional(),
 });
 
 export const purchaseListQuery = listQuery.merge(dateRangeQuery).extend({ supplierId: objectId.optional() });
@@ -65,6 +67,8 @@ export const createSupplierPaymentSchema = z.object({
   date: optionalDate,
   note: trimmed(300).default(''),
   source: z.enum(['manual', 'voice']).default('manual'),
+  /** Set when the voice assistant saves this; lets the entry be undone. */
+  voiceLogId: objectId.optional(),
 });
 
 export const supplierPaymentListQuery = listQuery.merge(dateRangeQuery).extend({ supplierId: objectId.optional() });

@@ -12,6 +12,7 @@ export const INTENTS = [
   'query_balance',
   'query_stock',
   'query_summary',
+  'undo_last',
   'unknown',
 ] as const;
 export type Intent = (typeof INTENTS)[number];

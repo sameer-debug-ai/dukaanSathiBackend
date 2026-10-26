@@ -13,6 +13,7 @@ import {
   type UpdateProductInput,
 } from '../validators/product.validators';
 import { applyStockChange } from './stock.service';
+import { recordVoiceEffect } from './voiceEffects';
 
 export type StockStatus = 'in' | 'low' | 'out';
 
@@ -78,10 +79,11 @@ async function defaultThreshold(shopId: Types.ObjectId): Promise<number> {
 }
 
 export async function createProduct(shopId: Types.ObjectId, input: CreateProductInput, userId?: string, session?: ClientSession) {
-  const { openingStock, ...rest } = input;
+  const { openingStock, voiceLogId, ...rest } = input;
   const threshold = rest.lowStockThreshold ?? (await defaultThreshold(shopId));
   const create = async (s?: ClientSession) => {
     const [doc] = await Product.create([{ ...rest, lowStockThreshold: threshold, shopId, currentStock: 0 }], { session: s });
+    await recordVoiceEffect(shopId, voiceLogId, [{ kind: 'product', id: doc!._id }], s);
     if (openingStock > 0) {
       return applyStockChange(
         { shopId, productId: doc!._id, quantity: openingStock, type: 'adjustment', note: 'Opening stock', userId },
@@ -130,13 +132,10 @@ export async function adjustStock(shopId: Types.ObjectId, input: AdjustStockInpu
   if (product.currentStock + quantity < 0) {
     throw AppError.badRequest(`Only ${product.currentStock} ${product.unit} in stock; cannot remove ${Math.abs(quantity)}`);
   }
-  const updated = await applyStockChange({
-    shopId,
-    productId: input.productId,
-    quantity,
-    type: input.type,
-    note: input.note,
-    userId,
+  const updated = await runInTransaction(async (session) => {
+    const p = await applyStockChange({ shopId, productId: input.productId, quantity, type: input.type, note: input.note, userId }, session);
+    await recordVoiceEffect(shopId, input.voiceLogId, [{ kind: 'stock', productId: p._id, quantity }], session);
+    return p;
   });
   return serializeProduct(updated);
 }

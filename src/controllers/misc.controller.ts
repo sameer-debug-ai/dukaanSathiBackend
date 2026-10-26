@@ -7,6 +7,9 @@ import { dashboardCharts, dashboardSummary } from '../services/dashboard.service
 import { REPORTS, reportToCsv, type ReportName } from '../services/report.service';
 import * as sales from '../services/sale.service';
 import { exportBackup, loadSampleData, shopDataCounts } from '../services/settings.service';
+import { learnAliases } from '../services/aliasLearning.service';
+import { lastUndoableVoiceLog, undoVoiceCommand } from '../services/voiceUndo.service';
+import { objectId } from '../validators/common';
 import { created, ok } from '../utils/apiResponse';
 import { AppError } from '../utils/AppError';
 import { istDayKey } from '../utils/istDate';
@@ -76,6 +79,28 @@ export async function patchLog(req: Request, res: Response) {
   const doc = await updateVoiceLog(shopIdOf(req), req.params.id!, req.body);
   if (!doc) throw AppError.notFound('Voice log not found');
   return ok(res, doc);
+}
+
+/** Undo a saved voice command (within the shop's undo window). */
+export async function undoLog(req: Request, res: Response) {
+  return ok(res, await undoVoiceCommand(shopIdOf(req), req.params.id!, req.auth?.userId), 'Undone');
+}
+/** Undo the most recent saved voice command ("galti ho gayi"). */
+export async function undoLast(req: Request, res: Response) {
+  const last = await lastUndoableVoiceLog(shopIdOf(req));
+  if (!last) throw AppError.badRequest('Nothing recent to undo');
+  return ok(res, await undoVoiceCommand(shopIdOf(req), String(last._id), req.auth?.userId), 'Undone');
+}
+
+export const learnAliasesSchema = z.object({
+  items: z
+    .array(z.object({ kind: z.enum(['customer', 'product', 'supplier']), id: objectId, alias: z.string().trim().min(1).max(60) }))
+    .min(1)
+    .max(20),
+});
+export async function learnAliasesHandler(req: Request, res: Response) {
+  const { items } = req.body as z.infer<typeof learnAliasesSchema>;
+  return ok(res, await learnAliases(shopIdOf(req), items));
 }
 
 // ---------- Settings ----------

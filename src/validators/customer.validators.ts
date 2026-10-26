@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { dateRangeQuery, indianPhoneOptional, listQuery, objectId, optionalDate, paise, positivePaise, qty, stringList, trimmed } from './common';
 
-export const createCustomerSchema = z.object({
+const customerBase = z.object({
   name: z.string().trim().min(1, 'Customer name is required').max(100),
   aliases: stringList,
   phone: indianPhoneOptional,
@@ -9,7 +9,12 @@ export const createCustomerSchema = z.object({
   creditLimit: paise.optional(),
 });
 
-export const updateCustomerSchema = createCustomerSchema.partial();
+export const createCustomerSchema = customerBase.extend({
+  /** Created by the voice assistant for a new person taking udhaar; undo removes them again. */
+  voiceLogId: objectId.optional(),
+});
+
+export const updateCustomerSchema = customerBase.partial();
 
 export const customerListQuery = listQuery.extend({
   filter: z.enum(['all', 'due', 'clear']).optional(),
@@ -28,6 +33,8 @@ export const addCreditSchema = z.object({
   note: trimmed(300).default(''),
   date: optionalDate,
   source: z.enum(['manual', 'voice']).default('manual'),
+  /** Set when the voice assistant saves this; lets the entry be undone. */
+  voiceLogId: objectId.optional(),
   rawVoiceText: trimmed(1000).optional(),
 });
 
@@ -37,6 +44,8 @@ export const addPaymentSchema = z.object({
   note: trimmed(300).default(''),
   date: optionalDate,
   source: z.enum(['manual', 'voice']).default('manual'),
+  /** Set when the voice assistant saves this; lets the entry be undone. */
+  voiceLogId: objectId.optional(),
   rawVoiceText: trimmed(1000).optional(),
 });
 

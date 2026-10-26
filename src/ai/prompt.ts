@@ -16,6 +16,7 @@ Return ONLY the JSON object for the schema. Choose one intent:
 - query_balance: "Sharma ji ka kitna udhaar baaki hai?"
 - query_stock: "cheeni kitni bachi hai?" (queryType "product", productName "cheeni"), "kya kya khatam hone wala hai?" / "low stock aur out of stock items" (queryType "low_stock": both low and out). Only items already finished, e.g. "kya kya khatam ho gaya?", "out of stock items batao" -> queryType "out_of_stock".
 - query_summary: "aaj kitni bikri hui?" -> period "today". "is hafte" -> "week", "is mahine" -> "month", "kal" -> "yesterday".
+- undo_last: reverse the previous voice entry. "galti ho gayi", "pichhla wala hatao", "undo karo", "cancel karo", "last entry delete karo", "that was wrong, undo". No other fields.
 - unknown: anything else or too unclear.
 
 Rules:

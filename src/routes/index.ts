@@ -102,6 +102,9 @@ router.get('/ai/status', h(misc.aiStatus));
 router.post('/ai/parse-command', aiLimiter, validate(misc.parseCommandSchema), h(misc.parseCommand));
 router.get('/voice-logs', validate(listQuery.extend({ status: z.string().optional() }), 'query'), h(misc.listLogs));
 router.patch('/voice-logs/:id', id, validate(misc.voiceLogPatchSchema), h(misc.patchLog));
+router.post('/ai/undo-last', h(misc.undoLast));
+router.post('/ai/undo/:id', id, h(misc.undoLog));
+router.post('/ai/learn-aliases', validate(misc.learnAliasesSchema), h(misc.learnAliasesHandler));
 
 // Settings
 router.get('/settings/backup', h(misc.backup));

@@ -14,6 +14,7 @@ import type {
   UpdateCustomerInput,
 } from '../validators/customer.validators';
 import { addLedgerEntry, computeRunningBalance, sumLedger } from './ledger.service';
+import { recordVoiceEffect } from './voiceEffects';
 
 const SORTS: Record<string, Record<string, 1 | -1>> = {
   '-balance': { currentBalance: -1, name: 1 },
@@ -77,7 +78,10 @@ export async function createCustomer(shopId: Types.ObjectId, input: CreateCustom
     const dup = await Customer.exists({ shopId, phone: input.phone, isDeleted: false });
     if (dup) throw AppError.conflict('A customer with this phone number already exists');
   }
-  return Customer.create({ ...input, shopId });
+  const { voiceLogId, ...fields } = input;
+  const doc = await Customer.create({ ...fields, shopId });
+  await recordVoiceEffect(shopId, voiceLogId, [{ kind: 'customer', id: doc._id }]);
+  return doc;
 }
 
 export async function updateCustomer(shopId: Types.ObjectId, id: string, input: UpdateCustomerInput) {
@@ -148,6 +152,7 @@ export function addCredit(shopId: Types.ObjectId, customerId: string, input: Add
       },
       session,
     );
+    await recordVoiceEffect(shopId, input.voiceLogId, [{ kind: 'ledger', id: entry._id }], session);
     return { entry: entry.toJSON(), customer: customer.toJSON() };
   });
 }
@@ -168,6 +173,7 @@ export function addPayment(shopId: Types.ObjectId, customerId: string, input: Ad
       },
       session,
     );
+    await recordVoiceEffect(shopId, input.voiceLogId, [{ kind: 'ledger', id: entry._id }], session);
     return { entry: entry.toJSON(), customer: customer.toJSON() };
   });
 }

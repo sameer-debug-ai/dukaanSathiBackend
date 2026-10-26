@@ -16,6 +16,7 @@ import type {
 } from '../validators/supplier.validators';
 import { attachRef } from './lookup';
 import { applyStockChange } from './stock.service';
+import { recordVoiceEffect } from './voiceEffects';
 
 interface SupplierTotals {
   totalPurchased: number;
@@ -154,6 +155,9 @@ export async function createPurchase(shopId: Types.ObjectId, input: CreatePurcha
 
     const purchaseId = new Types.ObjectId();
     const items: { productId: Types.ObjectId; name: string; unit: string; qty: number; rate: number; total: number }[] = [];
+    // For voice undo: products this purchase created, and cost prices it is about to overwrite.
+    const createdProducts: Types.ObjectId[] = [];
+    const prevPrices: { productId: Types.ObjectId; purchasePrice: number }[] = [];
 
     for (const line of input.items) {
       let product;
@@ -177,6 +181,10 @@ export async function createPurchase(shopId: Types.ObjectId, input: CreatePurcha
           ],
           { session },
         );
+        createdProducts.push(product!._id);
+      }
+      if (line.productId && !prevPrices.some((p) => p.productId.equals(product!._id))) {
+        prevPrices.push({ productId: product!._id, purchasePrice: product!.purchasePrice });
       }
       items.push({ productId: product!._id, name: product!.name, unit: product!.unit, qty: line.qty, rate: line.rate, total: lineTotal(line.qty, line.rate) });
     }
@@ -230,6 +238,15 @@ export async function createPurchase(shopId: Types.ObjectId, input: CreatePurcha
       { $inc: { currentPayable: dueAmount }, $max: { lastTransactionAt: date } },
       { session },
     );
+    await recordVoiceEffect(
+      shopId,
+      input.voiceLogId,
+      [
+        ...createdProducts.map((id) => ({ kind: 'product' as const, id })),
+        { kind: 'purchase', id: purchaseId, prevPrices: input.updatePurchasePrice ? prevPrices : [] },
+      ],
+      session,
+    );
     return purchase!.toJSON();
   });
 }
@@ -275,7 +292,9 @@ export async function createSupplierPayment(shopId: Types.ObjectId, input: Creat
       if (!existing) throw AppError.notFound('Supplier not found');
       throw AppError.badRequest(`Only ${formatInr(Math.max(0, existing.currentPayable))} is due to ${existing.name}. Payment cannot be more than that.`);
     }
-    const [payment] = await SupplierPayment.create([{ ...input, date, shopId }], { session });
+    const { voiceLogId, ...fields } = input;
+    const [payment] = await SupplierPayment.create([{ ...fields, date, shopId }], { session });
+    await recordVoiceEffect(shopId, voiceLogId, [{ kind: 'supplierPayment', id: payment!._id }], session);
     return { payment: payment!.toJSON(), supplier: supplier.toJSON() };
   });
 }

@@ -41,6 +41,9 @@ export const updateProfileSchema = z
         lowStockDefault: z.number().min(0).max(100000),
         allowOversell: z.boolean(),
         darkMode: z.boolean(),
+        voiceAlwaysConfirm: z.boolean(),
+        voiceAutoSaveThreshold: z.number().min(0.5).max(1),
+        voiceUndoSeconds: z.number().int().min(10).max(600),
       })
       .partial(),
   })

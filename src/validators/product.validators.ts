@@ -21,6 +21,8 @@ const productBase = z.object({
 export const createProductSchema = productBase.extend({
   /** Opening stock is recorded as an 'adjustment' StockMovement. */
   openingStock: z.coerce.number().min(0).default(0),
+  /** Set when the voice assistant adds the product; lets it be undone. */
+  voiceLogId: objectId.optional(),
 });
 
 /** Stock is intentionally not editable here: use /stock/adjust. */
@@ -32,7 +34,7 @@ export const productListQuery = listQuery.extend({
 });
 
 /** A full new-product row from an import file (defaults applied). */
-export const importRowCreateSchema = createProductSchema.extend({
+export const importRowCreateSchema = createProductSchema.omit({ voiceLogId: true }).extend({
   sellingPrice: paise.default(0),
 });
 
@@ -53,6 +55,8 @@ export const adjustStockSchema = z.object({
   quantity: z.coerce.number().refine((v) => v !== 0, 'Quantity cannot be 0'),
   type: z.enum(['adjustment', 'damage', 'return', 'purchase']).default('adjustment'),
   note: trimmed(300).default(''),
+  /** Set when the voice assistant changes stock; lets it be undone. */
+  voiceLogId: objectId.optional(),
 });
 
 export const stockHistoryQuery = listQuery.merge(dateRangeQuery);

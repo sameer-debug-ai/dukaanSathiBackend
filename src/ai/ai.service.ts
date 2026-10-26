@@ -5,8 +5,10 @@ import { CustomerLedger } from '../models/customerLedger.model';
 import { Product } from '../models/product.model';
 import { Sale } from '../models/sale.model';
 import { Supplier } from '../models/supplier.model';
+import { User } from '../models/user.model';
 import { VoiceCommandLog } from '../models/voiceCommandLog.model';
 import { stockAlerts, stockStatusOf } from '../services/product.service';
+import { lastUndoableVoiceLog } from '../services/voiceUndo.service';
 import { addDays, endOfIstDay, istDayKey, parseIstDay, startOfIstDay } from '../utils/istDate';
 import { formatInr, lineTotal } from '../utils/money';
 import { ClaudeProvider } from './claude.provider';
@@ -64,6 +66,10 @@ export interface VoiceParseResult {
   answerData?: unknown;
   needsConfirmation: boolean;
   missing: string[];
+  /** 0-1: parser confidence x the weakest name match the command relies on. */
+  autoSaveConfidence: number;
+  /** Save straight away (shop turned "always ask" off, and the command is clear enough). */
+  autoSave: boolean;
 }
 
 interface ShopData {
@@ -172,7 +178,13 @@ export async function parseVoiceCommand(shopId: Types.ObjectId, rawText: string,
   result.engine = engine;
   result.engineNote = engineNote;
 
-  const isQuery = parsed.intent.startsWith('query_');
+  // Save without the card only when the shop opted in and the command is unambiguous.
+  const settings = (await User.findById(shopId).select('settings'))?.settings;
+  const { confidence, eligible } = scoreCommand(result);
+  result.autoSaveConfidence = confidence;
+  result.autoSave = eligible && settings?.voiceAlwaysConfirm === false && confidence >= (settings?.voiceAutoSaveThreshold ?? 0.85);
+
+  const isQuery = parsed.intent.startsWith('query_') || parsed.intent === 'undo_last';
   const log = await VoiceCommandLog.create({
     shopId,
     rawText: text,
@@ -225,6 +237,8 @@ async function resolve(
     settleFull: false,
     needsConfirmation: !parsed.intent.startsWith('query_') && parsed.intent !== 'unknown',
     missing: [],
+    autoSaveConfidence: 0,
+    autoSave: false,
   };
 
   if (parsed.customerName) res.customer = m.customers.match(parsed.customerName);
@@ -277,6 +291,16 @@ async function resolve(
     case 'query_summary':
       await answerQuery(shopId, parsed, res, data, lang);
       break;
+    case 'undo_last': {
+      // "galti ho gayi": point the app at the entry to reverse; it calls /ai/undo/:logId.
+      res.needsConfirmation = false;
+      const last = await lastUndoableVoiceLog(shopId);
+      res.answerData = { kind: 'undo', logId: last ? String(last._id) : null, text: last?.rawText ?? '' };
+      res.answer = last
+        ? t(lang, `Undoing: "${last.rawText}"`, `हटा रहे हैं: "${last.rawText}"`)
+        : t(lang, 'There is no recent voice entry to undo.', 'हटाने के लिए कोई हाल की आवाज़ वाली एंट्री नहीं है।');
+      break;
+    }
     case 'unknown':
       res.answer = t(
         lang,
@@ -286,6 +310,62 @@ async function resolve(
       break;
   }
   return res;
+}
+
+/** Intents that save something, and which of them may be auto-saved without the card. */
+const AUTO_SAVE_INTENTS = new Set(['add_credit', 'receive_payment', 'add_sale', 'adjust_stock', 'add_purchase', 'supplier_payment']);
+
+/**
+ * How sure we are about the whole command: the parser's confidence times the weakest name
+ * match it depends on. Only "clean" commands qualify at all: every name matched to exactly one
+ * record, an amount/quantity present, nothing missing and nobody new to create.
+ */
+export function scoreCommand(res: VoiceParseResult): { confidence: number; eligible: boolean } {
+  const scores: number[] = [];
+  let clean = AUTO_SAVE_INTENTS.has(res.intent) && res.needsConfirmation && res.missing.length === 0 && !res.newCustomerName;
+  const requireMatch = (m: EntityMatch | undefined) => {
+    if (!m || m.status !== 'matched' || !m.best) clean = false;
+    else scores.push(m.best.score);
+  };
+  const requireItems = () => {
+    if (!res.items.length) clean = false;
+    for (const i of res.items) {
+      requireMatch(i.match);
+      if (i.rate === null || i.qty <= 0) clean = false;
+    }
+  };
+  switch (res.intent) {
+    case 'add_credit':
+      requireMatch(res.customer);
+      if (res.items.length) requireItems();
+      if (!res.amount) clean = false;
+      break;
+    case 'receive_payment':
+      requireMatch(res.customer);
+      if (!res.amount) clean = false;
+      break;
+    case 'supplier_payment':
+      requireMatch(res.supplier);
+      if (!res.amount) clean = false;
+      break;
+    case 'add_purchase':
+      requireMatch(res.supplier);
+      requireItems();
+      break;
+    case 'add_sale':
+      requireItems();
+      if (res.paymentMode === 'udhaar') requireMatch(res.customer);
+      break;
+    case 'adjust_stock':
+      requireMatch(res.product);
+      if (!res.quantity) clean = false;
+      break;
+    default:
+      clean = false;
+  }
+  const matchScore = scores.length ? Math.min(...scores) : 0;
+  const confidence = Math.round(Math.max(0, Math.min(1, res.parsed.confidence * matchScore)) * 100) / 100;
+  return { confidence, eligible: clean };
 }
 
 /**
@@ -412,7 +492,11 @@ export async function updateVoiceLog(
   id: string,
   patch: { status: 'confirmed' | 'cancelled' | 'failed'; resultMessage?: string; error?: string; parsedJson?: unknown },
 ) {
-  const doc = await VoiceCommandLog.findOneAndUpdate({ _id: id, shopId }, { $set: patch }, { new: true });
+  const current = await VoiceCommandLog.findOne({ _id: id, shopId }).select('status');
+  if (!current) return null;
+  // An undone entry stays undone even if the client reports "saved" a moment later.
+  const { status: _status, ...rest } = patch;
+  const doc = await VoiceCommandLog.findOneAndUpdate({ _id: id, shopId }, { $set: current.status === 'undone' ? rest : patch }, { new: true });
   return doc?.toJSON() ?? null;
 }
 
