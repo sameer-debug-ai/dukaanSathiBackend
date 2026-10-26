@@ -68,11 +68,29 @@ export class EntityMatcher {
   }
 
   match(query: string | null | undefined): EntityMatch {
-    const q = normalizeName(query ?? '');
-    const rawQ = cleanName(query ?? '');
-    if (!q) return { query: query ?? '', status: 'not_found', best: null, candidates: [] };
-
     const scores = new Map<string, Candidate>();
+    // "इमरान खान" must find "Imran Khan": Hindi-script names are also tried in Roman letters.
+    const spellings = [query ?? ''];
+    if (/[ऀ-ॿ]/.test(query ?? '')) spellings.push(devanagariToRoman(query ?? ''));
+    for (const s of spellings) this.score(s, scores);
+    if (!normalizeName(query ?? '')) return { query: query ?? '', status: 'not_found', best: null, candidates: [] };
+
+    const candidates = [...scores.values()].filter((c) => c.score >= MIN_SCORE).sort((a, b) => b.score - a.score).slice(0, 5);
+    const [first, second] = candidates;
+    if (!first) return { query: query ?? '', status: 'not_found', best: null, candidates: [] };
+
+    const tie = second && first.score - second.score < AMBIGUITY_MARGIN;
+    const status: MatchStatus = first.score >= AUTO_ACCEPT && !tie ? 'matched' : 'ambiguous';
+    // Offer only real contenders: names close to the best score (two Sharmas), not every weak fuzzy hit.
+    const contenders = candidates.filter((c) => c.score >= first.score - CONTENDER_GAP);
+    return { query: query ?? '', status, best: first, candidates: contenders };
+  }
+
+  /** Adds every target's best score for one spelling of the query into `scores`. */
+  private score(query: string, scores: Map<string, Candidate>): void {
+    const q = normalizeName(query);
+    const rawQ = cleanName(query);
+    if (!q) return;
     const keep = (t: MatchTarget, score: number) => {
       const prev = scores.get(t.id);
       if (!prev || prev.score < score) scores.set(t.id, { id: t.id, name: t.name, subtitle: t.subtitle, score: Math.round(score * 100) / 100 });
@@ -87,16 +105,6 @@ export class EntityMatcher {
     }
     // Fuzzy-only hits (speech noise like "sarma") are capped so they never outrank an exact/whole-word hit.
     for (const r of this.fuse.search(q, { limit: 8 })) keep(r.item.target, Math.min(AUTO_ACCEPT, 1 - (r.score ?? 1)));
-
-    const candidates = [...scores.values()].filter((c) => c.score >= MIN_SCORE).sort((a, b) => b.score - a.score).slice(0, 5);
-    const [first, second] = candidates;
-    if (!first) return { query: query ?? '', status: 'not_found', best: null, candidates: [] };
-
-    const tie = second && first.score - second.score < AMBIGUITY_MARGIN;
-    const status: MatchStatus = first.score >= AUTO_ACCEPT && !tie ? 'matched' : 'ambiguous';
-    // Offer only real contenders: names close to the best score (two Sharmas), not every weak fuzzy hit.
-    const contenders = candidates.filter((c) => c.score >= first.score - CONTENDER_GAP);
-    return { query: query ?? '', status, best: first, candidates: contenders };
   }
 
   /** Finds known names mentioned anywhere in free text (used by the offline parser). */

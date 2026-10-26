@@ -36,10 +36,12 @@ function detectIntent(t: string, hasCustomer: boolean, hasSupplier: boolean, has
   if (has(t, 'stock') && has(t, 'badhao', 'badha', 'ghatao', 'ghata', 'kam', 'add', 'jodo', 'increase', 'decrease', 'reduce')) return 'adjust_stock';
   if (hasSupplier) {
     if (has(t, 'liya', 'liye', 'li', 'kharida', 'kharide', 'mangaya', 'aaya', 'aya', 'purchase', 'bought')) return 'add_purchase';
-    if (has(t, 'diye', 'diya', 'de', 'payment', 'paid', 'chukaya', 'bheje')) return 'supplier_payment';
+    if (has(t, 'diye', 'diya', 'de', 'payment', 'paid', 'chukaya', 'chukta', 'bheje', 'clear', 'settle')) return 'supplier_payment';
   }
   if (has(t, 'becha', 'beche', 'bechi', 'bech', 'sold', 'sale', 'bill')) return 'add_sale';
   if (hasCustomer) {
+    // "Sharma ji ka sara udhaar clear / chukta ho gaya": a full payment, not more udhaar.
+    if (isFullSettlement(t) && (has(t, 'ne') || has(t, ...CLEARED))) return 'receive_payment';
     if (has(t, 'ne') && has(t, 'diye', 'diya', 'de', 'diye', 'lauta', 'lautaye', 'paid', 'jama')) return 'receive_payment';
     if (has(t, 'jama', 'payment', 'mila', 'mile', 'wapas', 'vapas', 'received')) return 'receive_payment';
     if (has(t, 'udhaar', 'udhar', 'saman', 'samaan', 'gaya', 'gaye', 'le gaye', 'liya', 'diya', 'credit', 'khate', 'khata')) return 'add_credit';
@@ -48,6 +50,16 @@ function detectIntent(t: string, hasCustomer: boolean, hasSupplier: boolean, has
   }
   if (has(t, 'udhaar', 'udhar')) return 'add_credit';
   return 'unknown';
+}
+
+const CLEARED = ['clear', 'chukta', 'chuka', 'chukaya', 'chuka diya', 'settle', 'settled', 'khatam', 'jama', 'wapas', 'vapas', 'lauta', 'lautaya'];
+
+/** "sara / pura / poora / sab udhaar", "full payment", "hisaab clear". */
+function isFullSettlement(t: string): boolean {
+  return (
+    has(t, 'sara', 'saara', 'sari', 'saari', 'sare', 'saare', 'pura', 'poora', 'pure', 'poore', 'puri', 'poori', 'sab', 'full', 'total', 'all') ||
+    (has(t, 'hisaab', 'hisab') && has(t, ...CLEARED))
+  );
 }
 
 function detectDate(t: string): string | null {
@@ -101,7 +113,7 @@ function guessName(t: string): string | null {
 }
 
 /** "sharma ji" -> "Sharma ji": capitalise names, keep honorifics lowercase. */
-const titleCase = (s: string) =>
+export const titleCase = (s: string) =>
   s.replace(/\S+/g, (w) => (/^(ji|jee|bhaiya|bhai|aunty|uncle|seth|sahab|saab|didi|bhabhi)$/i.test(w) ? w.toLowerCase() : w[0]!.toUpperCase() + w.slice(1)));
 
 export interface RuleParserContext {
@@ -124,6 +136,7 @@ export function ruleParse(rawText: string, ctx: RuleParserContext): ParsedComman
 
   cmd.intent = detectIntent(t, customerHits.length > 0 || guessName(t) !== null, supplierHits.length > 0, productHits.length > 0);
   cmd.date = detectDate(t);
+  cmd.settleFull = (cmd.intent === 'receive_payment' || cmd.intent === 'supplier_payment') && isFullSettlement(t);
   // Keep the words as spoken (plus any honorific that follows) so the matcher can tell
   // "Sharma ji" (an exact alias) from a bare "Sharma" shared by two customers.
   const spoken = (key: string) => {
@@ -145,7 +158,7 @@ export function ruleParse(rawText: string, ctx: RuleParserContext): ParsedComman
       cmd.amount = money[0] ?? null;
       if (cmd.intent === 'add_credit') cmd.items = items;
       // "500 add kar do": no money word, so take the first number spoken.
-      if (cmd.amount === null && !(cmd.intent === 'add_credit' && items.length)) {
+      if (cmd.amount === null && !cmd.settleFull && !(cmd.intent === 'add_credit' && items.length)) {
         const n = t.match(/(\d+(?:\.\d+)?)/);
         if (n) cmd.amount = Math.round(Number(n[1]) * 100);
       }
@@ -158,7 +171,7 @@ export function ruleParse(rawText: string, ctx: RuleParserContext): ParsedComman
       break;
     case 'supplier_payment': {
       cmd.amount = money[0] ?? null;
-      if (cmd.amount === null) {
+      if (cmd.amount === null && !cmd.settleFull) {
         const n = t.match(/(\d+(?:\.\d+)?)/);
         if (n) cmd.amount = Math.round(Number(n[1]) * 100);
       }

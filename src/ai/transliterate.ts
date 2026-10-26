@@ -37,7 +37,7 @@ const LOANWORDS: Record<string, string> = {
   aid: 'add', ed: 'add', aidd: 'add',
   jor: 'jod', joro: 'jodo', jore: 'jode', jorna: 'jodna',
   stok: 'stock', bil: 'bill', sel: 'sale', pement: 'payment', bailens: 'balance', kredit: 'credit',
-  khatm: 'khatam', prodakt: 'product', prodkt: 'product', yupiai: 'upi', onlain: 'online', kesh: 'cash', kaish: 'cash',
+  khatm: 'khatam', kliyar: 'clear', klier: 'clear', setal: 'settle', ful: 'full', prodakt: 'product', prodkt: 'product', yupiai: 'upi', onlain: 'online', kesh: 'cash', kaish: 'cash',
 };
 
 interface Unit {

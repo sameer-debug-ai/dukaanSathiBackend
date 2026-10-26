@@ -10,10 +10,12 @@ import { stockAlerts, stockStatusOf } from '../services/product.service';
 import { addDays, endOfIstDay, istDayKey, parseIstDay, startOfIstDay } from '../utils/istDate';
 import { formatInr, lineTotal } from '../utils/money';
 import { ClaudeProvider } from './claude.provider';
+import { detectReplyLang } from './detectLang';
 import { validateParsedCommand, type Intent, type ParsedCommand } from './intentSchema';
 import { EntityMatcher, type EntityMatch, type MatchTarget } from './matcher';
 import { AiProviderError, type AiProvider, type ShopContext } from './provider';
-import { ruleParse } from './ruleParser';
+import { ruleParse, titleCase } from './ruleParser';
+import { devanagariToRoman } from './transliterate';
 
 /** Swap the provider here (or inject one in tests). */
 let provider: AiProvider = new ClaudeProvider();
@@ -37,6 +39,8 @@ export interface VoiceParseResult {
   text: string;
   engine: 'ai' | 'rules';
   engineNote?: string;
+  /** Language the command was spoken in; answers and spoken replies use it. */
+  replyLang: Lang;
   intent: Intent;
   confidence: number;
   parsed: ParsedCommand;
@@ -49,6 +53,12 @@ export interface VoiceParseResult {
   quantity: number | null;
   paymentMode: ParsedCommand['paymentMode'];
   date: string | null;
+  /** "Sara udhaar de diya": amount is the matched party's whole balance. */
+  settleFull: boolean;
+  /** Customer not in the khata (or only a weak/ambiguous match): suggested name for a new entry. */
+  newCustomerName?: string;
+  /** Pending balance (paise) of each candidate customer/supplier, so the card can refill the amount when the user picks another. */
+  balances?: Record<string, number>;
   /** For query intents: the spoken/displayed answer. Nothing is saved. */
   answer?: string;
   answerData?: unknown;
@@ -57,15 +67,15 @@ export interface VoiceParseResult {
 }
 
 interface ShopData {
-  customers: MatchTarget[];
-  suppliers: MatchTarget[];
+  customers: (MatchTarget & { balance: number })[];
+  suppliers: (MatchTarget & { balance: number })[];
   products: (MatchTarget & { unit: string; sellingPrice: number; purchasePrice: number; currentStock: number; lowStockThreshold: number })[];
 }
 
 async function loadShopData(shopId: Types.ObjectId): Promise<ShopData> {
   const [customers, suppliers, products] = await Promise.all([
     Customer.find({ shopId, isDeleted: false }).select('name aliases phone currentBalance').limit(2000),
-    Supplier.find({ shopId, isDeleted: false }).select('name aliases company').limit(500),
+    Supplier.find({ shopId, isDeleted: false }).select('name aliases company currentPayable').limit(500),
     Product.find({ shopId, isDeleted: false }).select('name nameHindi aliases unit sellingPrice purchasePrice currentStock lowStockThreshold').limit(3000),
   ]);
   return {
@@ -74,8 +84,15 @@ async function loadShopData(shopId: Types.ObjectId): Promise<ShopData> {
       name: c.name,
       aliases: c.aliases,
       subtitle: [c.phone, c.currentBalance > 0 ? `owes ${formatInr(c.currentBalance)}` : ''].filter(Boolean).join(' · '),
+      balance: c.currentBalance,
     })),
-    suppliers: suppliers.map((s) => ({ id: String(s._id), name: s.name, aliases: [...s.aliases, s.company].filter(Boolean), subtitle: s.company })),
+    suppliers: suppliers.map((s) => ({
+      id: String(s._id),
+      name: s.name,
+      aliases: [...s.aliases, s.company].filter(Boolean),
+      subtitle: [s.company, s.currentPayable > 0 ? `due ${formatInr(s.currentPayable)}` : ''].filter(Boolean).join(' · '),
+      balance: s.currentPayable,
+    })),
     products: products.map((p) => ({
       id: String(p._id),
       name: p.name,
@@ -148,7 +165,10 @@ export async function parseVoiceCommand(shopId: Types.ObjectId, rawText: string,
     parsed = ruleParse(text, matchers);
   }
 
-  const result = await resolve(shopId, text, parsed, data, matchers, lang);
+  // Answer in the language that was spoken; the app's UI language is only the fallback.
+  const replyLang = detectReplyLang(text, lang);
+  const result = await resolve(shopId, text, parsed, data, matchers, replyLang);
+  result.replyLang = replyLang;
   result.engine = engine;
   result.engineNote = engineNote;
 
@@ -192,6 +212,7 @@ async function resolve(
     logId: '',
     text,
     engine: 'rules',
+    replyLang: lang,
     intent: parsed.intent,
     confidence: parsed.confidence,
     parsed,
@@ -201,13 +222,26 @@ async function resolve(
     quantity: parsed.quantity,
     paymentMode: parsed.paymentMode,
     date: parsed.date,
+    settleFull: false,
     needsConfirmation: !parsed.intent.startsWith('query_') && parsed.intent !== 'unknown',
     missing: [],
   };
 
   if (parsed.customerName) res.customer = m.customers.match(parsed.customerName);
+  // Udhaar for someone not in the khata yet ("Anil Gupta ne 500 ka udhaar liya"): offer to add them,
+  // with the name in Roman letters like the rest of the list. A confident match is never replaced.
+  const givesCredit = parsed.intent === 'add_credit' || (parsed.intent === 'add_sale' && parsed.paymentMode === 'udhaar');
+  // Two customers with exactly this name means "pick one of them", not "add a third".
+  const strongMatch = (res.customer?.best?.score ?? 0) >= 0.8;
+  if (givesCredit && parsed.customerName && !strongMatch) {
+    res.newCustomerName = titleCase(devanagariToRoman(parsed.customerName).replace(/\s+/g, ' ').trim());
+  }
   if (parsed.supplierName) res.supplier = m.suppliers.match(parsed.supplierName);
   if (parsed.productName) res.product = m.products.match(parsed.productName);
+
+  if (parsed.settleFull && (parsed.intent === 'receive_payment' || parsed.intent === 'supplier_payment')) {
+    settleFullBalance(res, parsed.intent === 'receive_payment' ? res.customer : res.supplier, parsed.intent === 'receive_payment' ? data.customers : data.suppliers, lang);
+  }
 
   const need = (cond: boolean, field: string) => {
     if (cond) res.missing.push(field);
@@ -216,7 +250,7 @@ async function resolve(
     case 'add_credit':
     case 'receive_payment':
       need(!parsed.customerName, 'customer');
-      need(!res.amount, 'amount');
+      need(!res.amount && !res.settleFull, 'amount');
       break;
     case 'add_purchase':
       need(!parsed.supplierName, 'supplier');
@@ -224,7 +258,7 @@ async function resolve(
       break;
     case 'supplier_payment':
       need(!parsed.supplierName, 'supplier');
-      need(!res.amount, 'amount');
+      need(!res.amount && !res.settleFull, 'amount');
       break;
     case 'add_sale':
       need(!items.length, 'items');
@@ -254,6 +288,29 @@ async function resolve(
   return res;
 }
 
+/**
+ * "Sharma ji ne sara udhaar de diya": the amount is whatever they owe right now.
+ * Nothing owed -> answer that instead of asking to save a zero payment.
+ */
+function settleFullBalance(res: VoiceParseResult, match: EntityMatch | undefined, parties: { id: string; name: string; balance: number }[], lang: Lang) {
+  const byId = new Map(parties.map((p) => [p.id, p]));
+  res.settleFull = true;
+  res.balances = Object.fromEntries((match?.candidates ?? []).map((c) => [c.id, Math.max(0, byId.get(c.id)?.balance ?? 0)]));
+  if (match?.status !== 'matched' || !match.best) return;
+  const party = byId.get(match.best.id);
+  if (!party) return;
+  if (party.balance > 0) {
+    res.amount = party.balance;
+    return;
+  }
+  const isCustomer = res.intent === 'receive_payment';
+  res.needsConfirmation = false;
+  res.answerData = isCustomer ? { kind: 'balance', customerId: party.id, name: party.name, balance: 0 } : undefined;
+  res.answer = isCustomer
+    ? t(lang, `${party.name} has no pending udhaar. Nothing to clear.`, `${party.name} का कोई उधार बाकी नहीं है।`)
+    : t(lang, `Nothing is due to ${party.name}.`, `${party.name} का कोई बकाया नहीं है।`);
+}
+
 async function answerQuery(shopId: Types.ObjectId, parsed: ParsedCommand, res: VoiceParseResult, data: ShopData, lang: Lang) {
   if (parsed.intent === 'query_balance') {
     const match = res.customer;
@@ -262,7 +319,14 @@ async function answerQuery(shopId: Types.ObjectId, parsed: ParsedCommand, res: V
       return;
     }
     if (match.status === 'ambiguous') {
-      res.answer = t(lang, 'Several customers match. Please pick one.', 'कई ग्राहक मिले, एक चुनें।');
+      // Two customers with the same/similar name: answer with every one's balance instead of a dead end.
+      const balanceOf = new Map(data.customers.map((c) => [c.id, c.balance]));
+      const lines = match.candidates.map((c) => `${c.name}: ${formatInr(Math.max(0, balanceOf.get(c.id) ?? 0))}`).join(', ');
+      res.answer = t(
+        lang,
+        `${match.candidates.length} customers match "${parsed.customerName ?? ''}". ${lines}. Tap one to open their khata.`,
+        `"${parsed.customerName ?? ''}" नाम के ${match.candidates.length} ग्राहक मिले। ${lines}। खाता खोलने के लिए एक चुनें।`,
+      );
       res.needsConfirmation = false;
       res.answerData = { kind: 'choose', choose: match.candidates };
       return;

@@ -181,6 +181,22 @@ describe('ruleParse (offline fallback)', () => {
     expect(ruleParse('naya product jodo, Surf Excel 1kg, 120 rupay', ctx)).toMatchObject({ intent: 'add_product', sellingPrice: 12000 });
   });
 
+  it('full settlement: amount left for the server to fill from the balance', () => {
+    const full = { intent: 'receive_payment', settleFull: true, amount: null };
+    expect(ruleParse('Sharma ji ne apna sara udhaar de diya', ctx)).toMatchObject(full);
+    expect(ruleParse('Sharma ji ka pura hisaab clear ho gaya', ctx)).toMatchObject(full);
+    expect(ruleParse('शर्मा जी ने अपना सारा उधार चुका दिया', ctx)).toMatchObject(full);
+    expect(ruleParse('Ramesh traders ka sara hisaab chukta kar diya', ctx)).toMatchObject({ intent: 'supplier_payment', settleFull: true, amount: null });
+    // A partial payment or a plain credit is not a settlement.
+    expect(ruleParse('Sharma ji ne 300 rupay de diye', ctx)).toMatchObject({ intent: 'receive_payment', settleFull: false, amount: 30000 });
+    expect(ruleParse('Sharma ji ke udhaar me 500 add kar do', ctx)).toMatchObject({ intent: 'add_credit', settleFull: false });
+  });
+
+  it('Devanagari speech', () => {
+    expect(ruleParse('शर्मा जी के उधार में 500 ऐड कर दो', ctx)).toMatchObject({ intent: 'add_credit', amount: 50000 });
+    expect(ruleParse('क्या क्या खत्म हो गया', ctx)).toMatchObject({ intent: 'query_stock', queryType: 'out_of_stock' });
+  });
+
   it('unknown', () => {
     expect(ruleParse('mausam kaisa hai', ctx).intent).toBe('unknown');
   });

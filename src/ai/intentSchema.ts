@@ -45,6 +45,9 @@ export const ParsedCommandSchema = z.object({
   date: z.string().nullable().describe('YYYY-MM-DD if a day was mentioned (aaj/kal/parso), else null'),
   period: z.enum(['today', 'yesterday', 'week', 'month']).nullable(),
   queryType: z.enum(['product', 'low_stock', 'out_of_stock']).nullable(),
+  settleFull: z
+    .boolean()
+    .describe('true when the WHOLE pending balance was paid/cleared ("sara udhaar de diya", "hisaab clear"); amount is then null'),
   note: z.string().nullable(),
   confidence: z.number().describe('0 to 1: how sure you are about the intent and values'),
 });
@@ -67,6 +70,7 @@ export const emptyCommand = (intent: Intent = 'unknown'): ParsedCommand => ({
   date: null,
   period: null,
   queryType: null,
+  settleFull: false,
   note: null,
   confidence: 0,
 });
