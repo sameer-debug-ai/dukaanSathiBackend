@@ -13,6 +13,7 @@ export const INTENTS = [
   'query_stock',
   'query_summary',
   'undo_last',
+  'reset_context',
   'unknown',
 ] as const;
 export type Intent = (typeof INTENTS)[number];
@@ -54,6 +55,14 @@ export const ParsedCommandSchema = z.object({
 });
 
 export type ParsedCommand = z.infer<typeof ParsedCommandSchema>;
+
+/** Most actions one sentence may carry ("Sharma ji ke 500 likho aur Gupta ji ne 200 de diye"). */
+export const MAX_ACTIONS = 5;
+
+/** What the AI returns: one entry per action in the sentence, in the order spoken. */
+export const ParsedBatchSchema = z.object({
+  actions: z.array(ParsedCommandSchema).describe('One entry per separate action in the command, in spoken order. Usually exactly one.'),
+});
 export type ParsedItem = z.infer<typeof ParsedItem>;
 
 export const emptyCommand = (intent: Intent = 'unknown'): ParsedCommand => ({
@@ -96,4 +105,20 @@ export function validateParsedCommand(raw: unknown): { ok: true; value: ParsedCo
       confidence: Math.min(1, Math.max(0, v.confidence)),
     },
   };
+}
+
+/**
+ * Validates the AI's list of actions. A bare single command (older shape) is accepted too.
+ * Extra actions beyond MAX_ACTIONS are dropped; an empty list is invalid.
+ */
+export function validateParsedBatch(raw: unknown): { ok: true; value: ParsedCommand[] } | { ok: false; error: string } {
+  const list = raw && typeof raw === 'object' && Array.isArray((raw as { actions?: unknown }).actions) ? (raw as { actions: unknown[] }).actions : [raw];
+  if (!list.length) return { ok: false, error: 'actions: expected at least one action' };
+  const out: ParsedCommand[] = [];
+  for (const [i, item] of list.slice(0, MAX_ACTIONS).entries()) {
+    const r = validateParsedCommand(item);
+    if (!r.ok) return { ok: false, error: list.length > 1 ? `actions.${i}: ${r.error}` : r.error };
+    out.push(r.value);
+  }
+  return { ok: true, value: out };
 }

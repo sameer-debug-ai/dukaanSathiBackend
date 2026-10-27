@@ -8,6 +8,7 @@ import { REPORTS, reportToCsv, type ReportName } from '../services/report.servic
 import * as sales from '../services/sale.service';
 import { exportBackup, loadSampleData, shopDataCounts } from '../services/settings.service';
 import { learnAliases } from '../services/aliasLearning.service';
+import { executeVoiceBatch, type ExecuteBatchInput } from '../services/voiceBatch.service';
 import { lastUndoableVoiceLog, undoVoiceCommand } from '../services/voiceUndo.service';
 import { objectId } from '../validators/common';
 import { created, ok } from '../utils/apiResponse';
@@ -90,6 +91,12 @@ export async function undoLast(req: Request, res: Response) {
   const last = await lastUndoableVoiceLog(shopIdOf(req));
   if (!last) throw AppError.badRequest('Nothing recent to undo');
   return ok(res, await undoVoiceCommand(shopIdOf(req), String(last._id), req.auth?.userId), 'Undone');
+}
+
+export { executeBatchSchema } from '../services/voiceBatch.service';
+/** Save every action of a multi-action voice command together ("Sab save karo"). */
+export async function executeBatch(req: Request, res: Response) {
+  return created(res, await executeVoiceBatch(shopIdOf(req), req.body as ExecuteBatchInput, req.auth?.userId), 'Saved');
 }
 
 export const learnAliasesSchema = z.object({

@@ -1,4 +1,4 @@
-﻿import { Types } from 'mongoose';
+﻿import { Types, type ClientSession } from 'mongoose';
 import { runInTransaction } from '../config/db';
 import { Customer } from '../models/customer.model';
 import { Product } from '../models/product.model';
@@ -40,8 +40,8 @@ export interface StockShortage {
   unit: string;
 }
 
-export async function createSale(shopId: Types.ObjectId, input: CreateSaleInput, userId?: string) {
-  return runInTransaction(async (session) => {
+export async function createSale(shopId: Types.ObjectId, input: CreateSaleInput, userId?: string, outer?: ClientSession) {
+  const run = async (session: ClientSession | undefined) => {
     const shop = await User.findById(shopId).select('settings').session(session ?? null);
     const ids = [...new Set(input.items.map((i) => i.productId))];
     const products = await Product.find({ shopId, _id: { $in: ids }, isDeleted: false }).session(session ?? null);
@@ -137,7 +137,8 @@ export async function createSale(shopId: Types.ObjectId, input: CreateSaleInput,
     await recordVoiceEffect(shopId, input.voiceLogId, [{ kind: 'sale', id: saleId }], session);
 
     return { ...sale!.toJSON(), warnings: shortages.length ? shortages : undefined };
-  });
+  };
+  return outer ? run(outer) : runInTransaction(run);
 }
 
 export async function listSales(shopId: Types.ObjectId, q: SaleListQuery) {

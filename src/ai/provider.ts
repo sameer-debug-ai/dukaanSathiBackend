@@ -14,6 +14,8 @@ export interface ParseRequest {
   text: string;
   context: ShopContext;
   todayIst: string;
+  /** Recent commands in this conversation, oldest first, so "unke" / "aur 200" can be resolved. */
+  history?: string[];
   /** Set on the retry after invalid output, describing what was wrong. */
   previousError?: string;
 }

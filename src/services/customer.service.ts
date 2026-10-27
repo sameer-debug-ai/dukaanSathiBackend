@@ -1,4 +1,4 @@
-import type { Types } from 'mongoose';
+import type { ClientSession, Types } from 'mongoose';
 import { runInTransaction } from '../config/db';
 import { Customer } from '../models/customer.model';
 import { CustomerLedger } from '../models/customerLedger.model';
@@ -73,14 +73,15 @@ export async function customerDetail(shopId: Types.ObjectId, id: string) {
   };
 }
 
-export async function createCustomer(shopId: Types.ObjectId, input: CreateCustomerInput) {
+/** `session`: run inside a caller's transaction (a multi-action voice command). */
+export async function createCustomer(shopId: Types.ObjectId, input: CreateCustomerInput, session?: ClientSession) {
   if (input.phone) {
-    const dup = await Customer.exists({ shopId, phone: input.phone, isDeleted: false });
+    const dup = await Customer.exists({ shopId, phone: input.phone, isDeleted: false }).session(session ?? null);
     if (dup) throw AppError.conflict('A customer with this phone number already exists');
   }
   const { voiceLogId, ...fields } = input;
-  const doc = await Customer.create({ ...fields, shopId });
-  await recordVoiceEffect(shopId, voiceLogId, [{ kind: 'customer', id: doc._id }]);
+  const doc = session ? (await Customer.create([{ ...fields, shopId }], { session }))[0]! : await Customer.create({ ...fields, shopId });
+  await recordVoiceEffect(shopId, voiceLogId, [{ kind: 'customer', id: doc._id }], session);
   return doc;
 }
 
@@ -136,8 +137,8 @@ export async function customerLedger(shopId: Types.ObjectId, id: string, q: { fr
   };
 }
 
-export function addCredit(shopId: Types.ObjectId, customerId: string, input: AddCreditInput) {
-  return runInTransaction(async (session) => {
+export function addCredit(shopId: Types.ObjectId, customerId: string, input: AddCreditInput, outer?: ClientSession) {
+  const run = async (session: ClientSession | undefined) => {
     const { entry, customer } = await addLedgerEntry(
       {
         shopId,
@@ -154,11 +155,12 @@ export function addCredit(shopId: Types.ObjectId, customerId: string, input: Add
     );
     await recordVoiceEffect(shopId, input.voiceLogId, [{ kind: 'ledger', id: entry._id }], session);
     return { entry: entry.toJSON(), customer: customer.toJSON() };
-  });
+  };
+  return outer ? run(outer) : runInTransaction(run);
 }
 
-export function addPayment(shopId: Types.ObjectId, customerId: string, input: AddPaymentInput) {
-  return runInTransaction(async (session) => {
+export function addPayment(shopId: Types.ObjectId, customerId: string, input: AddPaymentInput, outer?: ClientSession) {
+  const run = async (session: ClientSession | undefined) => {
     const { entry, customer } = await addLedgerEntry(
       {
         shopId,
@@ -175,5 +177,6 @@ export function addPayment(shopId: Types.ObjectId, customerId: string, input: Ad
     );
     await recordVoiceEffect(shopId, input.voiceLogId, [{ kind: 'ledger', id: entry._id }], session);
     return { entry: entry.toJSON(), customer: customer.toJSON() };
-  });
+  };
+  return outer ? run(outer) : runInTransaction(run);
 }

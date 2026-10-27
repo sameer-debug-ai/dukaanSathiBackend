@@ -12,11 +12,12 @@ import { lastUndoableVoiceLog } from '../services/voiceUndo.service';
 import { addDays, endOfIstDay, istDayKey, parseIstDay, startOfIstDay } from '../utils/istDate';
 import { formatInr, lineTotal } from '../utils/money';
 import { ClaudeProvider } from './claude.provider';
+import { applyContext, describeTurn, isResetCommand, loadConversation, rewriteFollowUp, type ConversationTurn } from './conversation';
 import { detectReplyLang } from './detectLang';
-import { validateParsedCommand, type Intent, type ParsedCommand } from './intentSchema';
+import { emptyCommand, validateParsedBatch, type Intent, type ParsedCommand } from './intentSchema';
 import { EntityMatcher, type EntityMatch, type MatchTarget } from './matcher';
 import { AiProviderError, type AiProvider, type ShopContext } from './provider';
-import { ruleParse, titleCase } from './ruleParser';
+import { ruleParseMany, titleCase } from './ruleParser';
 import { devanagariToRoman } from './transliterate';
 
 /** Swap the provider here (or inject one in tests). */
@@ -70,6 +71,11 @@ export interface VoiceParseResult {
   autoSaveConfidence: number;
   /** Save straight away (shop turned "always ask" off, and the command is clear enough). */
   autoSave: boolean;
+  /**
+   * Only when one sentence held several entries to save: each resolved on its own (the
+   * top-level fields repeat the first). They share `logId` and are saved together.
+   */
+  actions?: VoiceParseResult[];
 }
 
 interface ShopData {
@@ -123,13 +129,13 @@ function toContext(data: ShopData): ShopContext {
 }
 
 /** Calls the AI provider; validates; retries once on invalid output. */
-async function parseWithAi(text: string, context: ShopContext): Promise<ParsedCommand> {
+async function parseWithAi(text: string, context: ShopContext, history: string[]): Promise<ParsedCommand[]> {
   const todayIst = istDayKey(new Date());
   let previousError: string | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const raw = await provider.parseCommand({ text, context, todayIst, previousError });
-      const result = validateParsedCommand(raw);
+      const raw = await provider.parseCommand({ text, context, todayIst, history, previousError });
+      const result = validateParsedBatch(raw);
       if (result.ok) return result.value;
       previousError = result.error;
     } catch (err) {
@@ -154,48 +160,107 @@ export async function parseVoiceCommand(shopId: Types.ObjectId, rawText: string,
     products: new EntityMatcher(data.products),
   };
 
-  let parsed: ParsedCommand;
+  // Recent commands, so "unke" / "aur 200 jodo" know who is meant.
+  const turns = await loadConversation(shopId);
+
+  let actions: ParsedCommand[];
   let engine: 'ai' | 'rules' = 'rules';
   let engineNote: string | undefined;
-  if (provider.isAvailable()) {
+  if (isResetCommand(text)) {
+    // "naya" / "reset": nothing to parse, just start a fresh conversation.
+    actions = [{ ...emptyCommand('reset_context'), confidence: 1 }];
+  } else if (provider.isAvailable()) {
     try {
-      parsed = await parseWithAi(text, toContext(data));
+      actions = await parseWithAi(text, toContext(data), turns.map(describeTurn));
       engine = 'ai';
     } catch (err) {
       logger.warn('AI parse failed, using offline parser', err instanceof Error ? err.message : err);
       engineNote = err instanceof Error ? err.message : 'AI unavailable';
-      parsed = ruleParse(text, matchers);
+      actions = offlineParse(text, matchers, turns);
     }
   } else {
     engineNote = 'ANTHROPIC_API_KEY not set - using the offline parser';
-    parsed = ruleParse(text, matchers);
+    actions = offlineParse(text, matchers, turns);
   }
+  actions = pickActions(actions.map((a) => applyContext(a, text, turns)));
 
   // Answer in the language that was spoken; the app's UI language is only the fallback.
   const replyLang = detectReplyLang(text, lang);
-  const result = await resolve(shopId, text, parsed, data, matchers, replyLang);
-  result.replyLang = replyLang;
-  result.engine = engine;
-  result.engineNote = engineNote;
+  const resolved: VoiceParseResult[] = [];
+  for (const a of actions) resolved.push(await resolve(shopId, text, a, data, matchers, replyLang));
+  for (const r of resolved) {
+    r.replyLang = replyLang;
+    r.engine = engine;
+    r.engineNote = engineNote;
+  }
+  // A copy, so the first action is not nested inside itself.
+  const result: VoiceParseResult = { ...resolved[0]! };
+  const parsed = result.parsed;
+  if (resolved.length > 1 && resolved.every((r) => r.answer !== undefined && !r.needsConfirmation)) {
+    // Several questions ("Sharma ji aur Gupta ji ka kitna udhaar hai"): one combined answer.
+    result.answer = resolved.map((r) => r.answer).join(' ');
+    result.answerData = undefined;
+  } else if (resolved.length > 1) {
+    result.actions = resolved;
+  }
 
-  // Save without the card only when the shop opted in and the command is unambiguous.
+  // Save without the card only when the shop opted in and the command is unambiguous;
+  // with several actions, every one of them has to qualify.
   const settings = (await User.findById(shopId).select('settings'))?.settings;
-  const { confidence, eligible } = scoreCommand(result);
-  result.autoSaveConfidence = confidence;
-  result.autoSave = eligible && settings?.voiceAlwaysConfirm === false && confidence >= (settings?.voiceAutoSaveThreshold ?? 0.85);
+  const scores = resolved.map((r) => {
+    const s = scoreCommand(r);
+    r.autoSaveConfidence = s.confidence;
+    return s;
+  });
+  result.autoSaveConfidence = Math.min(...scores.map((s) => s.confidence));
+  result.autoSave =
+    scores.every((s) => s.eligible) && settings?.voiceAlwaysConfirm === false && result.autoSaveConfidence >= (settings?.voiceAutoSaveThreshold ?? 0.85);
 
-  const isQuery = parsed.intent.startsWith('query_') || parsed.intent === 'undo_last';
+  const isQuery = parsed.intent.startsWith('query_') || parsed.intent === 'undo_last' || parsed.intent === 'reset_context';
+  const stored = (r: VoiceParseResult) => ({ ...r.parsed, resolved: { customer: r.customer?.best, supplier: r.supplier?.best, product: r.product?.best } });
   const log = await VoiceCommandLog.create({
     shopId,
     rawText: text,
     intent: parsed.intent,
-    parsedJson: { ...parsed, resolved: { customer: result.customer?.best, supplier: result.supplier?.best, product: result.product?.best } },
+    parsedJson: result.actions ? { ...stored(result), actions: resolved.map(stored) } : stored(result),
     engine,
     status: parsed.intent === 'unknown' ? 'failed' : isQuery ? 'confirmed' : 'pending',
     resultMessage: result.answer ?? '',
   });
   result.logId = String(log._id);
+  for (const r of resolved) r.logId = result.logId;
   return result;
+}
+
+/** Intents that save something (and so can be grouped into one multi-action entry). */
+const SAVE_INTENTS = new Set<Intent>(['add_credit', 'receive_payment', 'add_sale', 'adjust_stock', 'add_purchase', 'supplier_payment', 'add_product']);
+
+/**
+ * Which parsed actions to act on. Entries to save win (a question mixed in is dropped);
+ * "undo" / "reset" stand alone; otherwise every question is answered. Unclear parts are
+ * dropped when something else was understood.
+ */
+function pickActions(list: ParsedCommand[]): ParsedCommand[] {
+  const known = list.filter((a) => a.intent !== 'unknown');
+  if (!known.length) return [list[0] ?? emptyCommand()];
+  const saving = known.filter((a) => SAVE_INTENTS.has(a.intent));
+  if (saving.length) return saving;
+  const special = known.find((a) => a.intent === 'undo_last' || a.intent === 'reset_context');
+  return special ? [special] : known;
+}
+
+/** Offline parser with the conversation: a follow-up ("unhone 100 aur diye") is spelled out in full first. */
+function offlineParse(
+  text: string,
+  matchers: { customers: EntityMatcher; suppliers: EntityMatcher; products: EntityMatcher },
+  turns: ConversationTurn[],
+): ParsedCommand[] {
+  const rewritten = rewriteFollowUp(text, turns, matchers);
+  if (rewritten !== text) {
+    const parsed = ruleParseMany(rewritten, matchers);
+    if (parsed.some((a) => a.intent !== 'unknown')) return parsed;
+  }
+  return ruleParseMany(text, matchers);
 }
 
 async function resolve(
@@ -301,6 +366,10 @@ async function resolve(
         : t(lang, 'There is no recent voice entry to undo.', 'हटाने के लिए कोई हाल की आवाज़ वाली एंट्री नहीं है।');
       break;
     }
+    case 'reset_context':
+      res.needsConfirmation = false;
+      res.answer = t(lang, 'Okay, starting fresh. Go ahead.', 'ठीक है, नई शुरुआत। बोलिए।');
+      break;
     case 'unknown':
       res.answer = t(
         lang,

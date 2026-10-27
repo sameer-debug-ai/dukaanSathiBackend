@@ -122,21 +122,23 @@ export async function stockAlerts(shopId: Types.ObjectId, limit = 50) {
   return { lowCount: low, outCount: out, total: low + out, items: items.map(serializeProduct) };
 }
 
-export async function adjustStock(shopId: Types.ObjectId, input: AdjustStockInput, userId?: string) {
+export async function adjustStock(shopId: Types.ObjectId, input: AdjustStockInput, userId?: string, outer?: ClientSession) {
   // Damage always removes stock; return/purchase always add, regardless of the sign sent.
   let quantity = input.quantity;
   if (input.type === 'damage') quantity = -Math.abs(quantity);
   if (input.type === 'return' || input.type === 'purchase') quantity = Math.abs(quantity);
 
-  const product = await getProduct(shopId, input.productId);
+  const product = outer ? await Product.findOne({ _id: input.productId, shopId, isDeleted: false }).session(outer) : await getProduct(shopId, input.productId);
+  if (!product) throw AppError.notFound('Product not found');
   if (product.currentStock + quantity < 0) {
     throw AppError.badRequest(`Only ${product.currentStock} ${product.unit} in stock; cannot remove ${Math.abs(quantity)}`);
   }
-  const updated = await runInTransaction(async (session) => {
+  const apply = async (session: ClientSession | undefined) => {
     const p = await applyStockChange({ shopId, productId: input.productId, quantity, type: input.type, note: input.note, userId }, session);
     await recordVoiceEffect(shopId, input.voiceLogId, [{ kind: 'stock', productId: p._id, quantity }], session);
     return p;
-  });
+  };
+  const updated = outer ? await apply(outer) : await runInTransaction(apply);
   return serializeProduct(updated);
 }
 

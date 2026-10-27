@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { env } from '../config/env';
-import { ParsedCommandSchema } from './intentSchema';
+import { ParsedBatchSchema } from './intentSchema';
 import { buildUserMessage, SYSTEM_PROMPT } from './prompt';
 import { AiProviderError, type AiProvider, type ParseRequest } from './provider';
 
@@ -22,7 +22,7 @@ export class ClaudeProvider implements AiProvider {
 
   async parseCommand(req: ParseRequest): Promise<unknown> {
     const messages: Anthropic.MessageParam[] = [
-      { role: 'user', content: buildUserMessage(req.text, req.context, req.todayIst) },
+      { role: 'user', content: buildUserMessage(req.text, req.context, req.todayIst, req.history) },
     ];
     if (req.previousError) {
       messages.push({
@@ -37,7 +37,7 @@ export class ClaudeProvider implements AiProvider {
         max_tokens: 4000,
         system: SYSTEM_PROMPT,
         messages,
-        output_config: { format: zodOutputFormat(ParsedCommandSchema), effort: 'low' },
+        output_config: { format: zodOutputFormat(ParsedBatchSchema), effort: 'low' },
       });
 
       if (response.stop_reason === 'refusal') throw new AiProviderError('The AI declined this command', false);

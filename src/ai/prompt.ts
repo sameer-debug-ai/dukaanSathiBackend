@@ -4,7 +4,14 @@ import type { ShopContext } from './provider';
 export const SYSTEM_PROMPT = `You convert a shopkeeper's spoken command into JSON for a kirana (Indian grocery) shop app.
 Commands are in Hindi, Hinglish or English, in Roman or Devanagari script, and come from speech recognition, so expect spelling noise.
 
-Return ONLY the JSON object for the schema. Choose one intent:
+Return ONLY the JSON object for the schema: {"actions": [...]}, one entry per action, in the order spoken.
+Most commands are one action. Use several only when the sentence clearly asks for separate things, joined by "aur", "and", "phir", "fir", "uske baad" or a comma:
+- "Sharma ji ke 500 likho aur Gupta ji ne 200 de diye" -> [add_credit Sharma ji 50000, receive_payment Gupta ji 20000].
+- "Ramesh traders ko 2000 diye aur chawal ka stock 10 kilo badhao" -> [supplier_payment, adjust_stock].
+Never split one action: "2 kilo cheeni aur 1 litre tel udhaar diya" is ONE add_credit with two items; "Sharma ji aur unki wife ka udhaar" is one person.
+At most 5 actions.
+
+For each action choose one intent:
 - add_credit: goods given on credit (udhaar) to a customer. "Sharma ji ke 500 rupay ka saman gaya", "Gupta ji ko 2 kilo cheeni aur 1 litre tel udhaar diya". Put mentioned goods in items.
 - receive_payment: customer paid money. "Sharma ji ne 300 rupay de diye", "Verma ji ka 1000 jama karo".
   If the customer paid ALL their udhaar ("Sharma ji ne apna sara udhaar de diya", "Gupta ji ka pura hisaab clear ho gaya", "Verma ji ne poora paisa chuka diya") set settleFull true and amount null; the app fills in their exact balance.
@@ -17,6 +24,7 @@ Return ONLY the JSON object for the schema. Choose one intent:
 - query_stock: "cheeni kitni bachi hai?" (queryType "product", productName "cheeni"), "kya kya khatam hone wala hai?" / "low stock aur out of stock items" (queryType "low_stock": both low and out). Only items already finished, e.g. "kya kya khatam ho gaya?", "out of stock items batao" -> queryType "out_of_stock".
 - query_summary: "aaj kitni bikri hui?" -> period "today". "is hafte" -> "week", "is mahine" -> "month", "kal" -> "yesterday".
 - undo_last: reverse the previous voice entry. "galti ho gayi", "pichhla wala hatao", "undo karo", "cancel karo", "last entry delete karo", "that was wrong, undo". No other fields.
+- reset_context: start a fresh conversation, forget earlier names. "naya", "nayi shuruaat", "reset karo", "start over". No other fields.
 - unknown: anything else or too unclear.
 
 Rules:
@@ -28,15 +36,23 @@ Rules:
 - add_credit is for anyone taking udhaar, also a new person who is not in the shop list yet ("Anil Gupta ne 12000 ka udhaar liya"); the app will add them.
 - Dates: today's date is given. "aaj" = today, "kal" with past tense = yesterday, "parso" = 2 days ago. If no day is mentioned, date is null.
 - settleFull is false unless the whole balance was cleared.
-- Do not guess amounts that were not said; use null. Set confidence below 0.5 when unsure.`;
+- Do not guess amounts that were not said; use null. Set confidence below 0.5 when unsure.
 
-export function buildUserMessage(text: string, ctx: ShopContext, todayIst: string): string {
+Recent conversation (given before the command, may be empty):
+- Words like "unke", "unka", "unki", "unko", "unhone", "inke", "iska", "uska", "usi ko", "wahi" refer to the person (or product, for "wahi wala") in the most recent earlier command. Put that person's name in customerName/supplierName.
+- A follow-up with no name repeats the previous action type for the same person: after "Sharma ji ke 500 likho", "aur 200 jodo" -> add_credit Sharma ji 20000. After "Gupta ji ne 300 diye", "unhone 100 aur diye" -> receive_payment Gupta ji 10000.
+- "aur" amounts are NEW entries of that amount, never a total: "aur 200" -> amount 20000.
+- Only use the conversation when the command refers to it; a command with its own names ignores it.`;
+
+export function buildUserMessage(text: string, ctx: ShopContext, todayIst: string, history: string[] = []): string {
   const list = (items: string[], max: number) => (items.length ? items.slice(0, max).join('; ') : '(none)');
   return `Today (Asia/Kolkata): ${todayIst}
 
 Shop customers: ${list(ctx.customers, 300)}
 Shop suppliers: ${list(ctx.suppliers, 100)}
 Shop products: ${list(ctx.products, 400)}
+
+Recent conversation (oldest first): ${history.length ? `\n${history.map((h) => `- ${h}`).join('\n')}` : '(none)'}
 
 Command: """${text}"""`;
 }

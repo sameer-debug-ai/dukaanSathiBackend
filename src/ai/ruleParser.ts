@@ -238,3 +238,39 @@ export function ruleParse(rawText: string, ctx: RuleParserContext): ParsedComman
   cmd.confidence = Math.min(0.85, confidence);
   return cmd;
 }
+
+/** Words that join two separate actions in one sentence. */
+const CLAUSE_SPLIT = /\s+(?:aur|and|phir|fir|uske baad|tatha)\s+|\s*[,;]\s*/i;
+
+/**
+ * Offline parser for a sentence with several actions: "Sharma ji ke 500 likho aur Gupta ji ne 200 de diye".
+ * Splits only where each side names its own customer/supplier (or a stock change) and has a number,
+ * so "2 kilo cheeni aur 1 litre tel" or "Sharma ji aur Gupta ji ne 200 diye" stay one action.
+ */
+export function ruleParseMany(rawText: string, ctx: RuleParserContext): ParsedCommand[] {
+  const text = normalizeSpokenNumbers(devanagariToRoman(rawText)).replace(/\s+/g, ' ').trim();
+  const parts = text.split(CLAUSE_SPLIT).map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 2) return [ruleParse(rawText, ctx)];
+
+  const isHead = (p: string) => ctx.customers.findMentions(p).length > 0 || ctx.suppliers.findMentions(p).length > 0 || has(p.toLowerCase(), 'stock');
+  const clauses: string[] = [];
+  let pending = '';
+  for (const p of parts) {
+    if (isHead(p) || !clauses.length) {
+      // A head-less start ("2 kilo cheeni") belongs to the clause that names the person.
+      if (!clauses.length && !isHead(p)) pending = pending ? `${pending} aur ${p}` : p;
+      else {
+        clauses.push(pending ? `${pending} aur ${p}` : p);
+        pending = '';
+      }
+    } else clauses[clauses.length - 1] += ` aur ${p}`;
+  }
+  if (pending) {
+    if (clauses.length) clauses[clauses.length - 1] += ` aur ${pending}`;
+    else clauses.push(pending);
+  }
+  if (clauses.length < 2 || clauses.some((c) => !/\d/.test(c))) return [ruleParse(rawText, ctx)];
+
+  const actions = clauses.map((c) => ruleParse(c, ctx));
+  return actions.some((a) => a.intent === 'unknown') ? [ruleParse(rawText, ctx)] : actions;
+}

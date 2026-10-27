@@ -1,4 +1,4 @@
-﻿import { Types } from 'mongoose';
+﻿import { Types, type ClientSession } from 'mongoose';
 import { runInTransaction } from '../config/db';
 import { Product } from '../models/product.model';
 import { Purchase } from '../models/purchase.model';
@@ -148,8 +148,8 @@ export async function supplierHistory(shopId: Types.ObjectId, id: string) {
   return { supplier: (await supplierDetail(shopId, id)), history: history.reverse() };
 }
 
-export async function createPurchase(shopId: Types.ObjectId, input: CreatePurchaseInput, userId?: string) {
-  return runInTransaction(async (session) => {
+export async function createPurchase(shopId: Types.ObjectId, input: CreatePurchaseInput, userId?: string, outer?: ClientSession) {
+  const run = async (session: ClientSession | undefined) => {
     const supplier = await Supplier.findOne({ _id: input.supplierId, shopId, isDeleted: false }).session(session ?? null);
     if (!supplier) throw AppError.notFound('Supplier not found');
 
@@ -248,7 +248,8 @@ export async function createPurchase(shopId: Types.ObjectId, input: CreatePurcha
       session,
     );
     return purchase!.toJSON();
-  });
+  };
+  return outer ? run(outer) : runInTransaction(run);
 }
 
 export async function listPurchases(
@@ -278,8 +279,8 @@ export async function getPurchase(shopId: Types.ObjectId, id: string) {
   return row;
 }
 
-export async function createSupplierPayment(shopId: Types.ObjectId, input: CreateSupplierPaymentInput) {
-  return runInTransaction(async (session) => {
+export async function createSupplierPayment(shopId: Types.ObjectId, input: CreateSupplierPaymentInput, outer?: ClientSession) {
+  const run = async (session: ClientSession | undefined) => {
     const date = input.date ?? new Date();
     // Same rule as purchases (paid can't exceed the bill): never pay more than is due.
     const supplier = await Supplier.findOneAndUpdate(
@@ -296,7 +297,8 @@ export async function createSupplierPayment(shopId: Types.ObjectId, input: Creat
     const [payment] = await SupplierPayment.create([{ ...fields, date, shopId }], { session });
     await recordVoiceEffect(shopId, voiceLogId, [{ kind: 'supplierPayment', id: payment!._id }], session);
     return { payment: payment!.toJSON(), supplier: supplier.toJSON() };
-  });
+  };
+  return outer ? run(outer) : runInTransaction(run);
 }
 
 export async function listSupplierPayments(
