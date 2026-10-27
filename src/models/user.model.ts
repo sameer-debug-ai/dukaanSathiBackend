@@ -16,6 +16,10 @@ const shopSettingsSchema = new Schema(
     voiceAutoSaveThreshold: { type: Number, default: 0.85, min: 0.5, max: 1 },
     /** How long a saved voice entry can be undone. */
     voiceUndoSeconds: { type: Number, default: 60, min: 10, max: 600 },
+    /** Shop's UPI ID (VPA), for "Pay via UPI" links and QR codes in reminders / statements. */
+    upiId: { type: String, trim: true, default: '' },
+    /** Name shown in the customer's UPI app (defaults to the shop name). */
+    upiPayeeName: { type: String, trim: true, default: '' },
   },
   { _id: false },
 );

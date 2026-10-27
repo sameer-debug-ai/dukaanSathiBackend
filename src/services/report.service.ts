@@ -6,6 +6,7 @@ import { Sale } from '../models/sale.model';
 import { Supplier } from '../models/supplier.model';
 import { SupplierPayment } from '../models/supplierPayment.model';
 import { IST_TIMEZONE, resolveRange } from '../utils/istDate';
+import { openCreditsFor } from './creditScore.service';
 import { stockValuation } from './product.service';
 
 export interface ReportRange {
@@ -279,6 +280,52 @@ export async function productSalesReport(shopId: Types.ObjectId, q: ReportRange)
   };
 }
 
+/** Age buckets (days) of the "Purana udhaar" report. */
+export const AGING_BUCKETS = [
+  { key: 'd0_30', max: 30 },
+  { key: 'd31_60', max: 60 },
+  { key: 'd61_90', max: 90 },
+  { key: 'd90_plus', max: Infinity },
+] as const;
+
+/**
+ * "Purana udhaar": each customer's pending udhaar split by how old it is. Payments settle the
+ * oldest udhaar first (FIFO), so what is left is the newest part of the debt.
+ */
+export async function agingReport(shopId: Types.ObjectId, now = new Date()): Promise<Report> {
+  const customers = await Customer.find({ shopId, isDeleted: false, currentBalance: { $gt: 0 } }).select('name phone currentBalance');
+  const open = await openCreditsFor(shopId, customers.map((c) => c._id));
+  const out = customers
+    .map((c) => {
+      const row: { name: string; phone: string; balance: number } & Record<(typeof AGING_BUCKETS)[number]['key'], number> = { name: c.name, phone: c.phone, d0_30: 0, d31_60: 0, d61_90: 0, d90_plus: 0, balance: c.currentBalance };
+      for (const o of open.get(String(c._id))?.open ?? []) {
+        const age = Math.floor((now.getTime() - o.date.getTime()) / 86_400_000);
+        row[AGING_BUCKETS.find((b) => age <= b.max)!.key] += o.remaining;
+      }
+      return row;
+    })
+    .sort((a, b) => b.d90_plus - a.d90_plus || b.d61_90 - a.d61_90 || b.d31_60 - a.d31_60 || b.balance - a.balance);
+  const totals = sumCols(out, ['d0_30', 'd31_60', 'd61_90', 'd90_plus', 'balance']);
+  return {
+    title: 'Old udhaar (aging)',
+    columns: [
+      { key: 'name', label: 'Customer', type: 'text' },
+      { key: 'phone', label: 'Phone', type: 'text' },
+      { key: 'd0_30', label: '0-30 days', type: 'money' },
+      { key: 'd31_60', label: '31-60 days', type: 'money' },
+      { key: 'd61_90', label: '61-90 days', type: 'money' },
+      { key: 'd90_plus', label: '90+ days', type: 'money' },
+      { key: 'balance', label: 'Balance now', type: 'money' },
+    ],
+    rows: out,
+    totals,
+    chart: {
+      labels: ['0-30', '31-60', '61-90', '90+'],
+      series: [{ label: 'Udhaar', data: [totals.d0_30!, totals.d31_60!, totals.d61_90!, totals.d90_plus!] }],
+    },
+  };
+}
+
 function sumCols(rows: Record<string, unknown>[], keys: string[]): Record<string, number> {
   const totals: Record<string, number> = {};
   for (const k of keys) totals[k] = rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
@@ -307,6 +354,7 @@ export const REPORTS = {
   'supplier-purchases': supplierPurchaseReport,
   'stock-valuation': (shopId: Types.ObjectId) => stockValuationReport(shopId),
   'product-sales': productSalesReport,
+  aging: (shopId: Types.ObjectId) => agingReport(shopId),
 } as const;
 
 export type ReportName = keyof typeof REPORTS;

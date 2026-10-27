@@ -2,6 +2,7 @@ import { createApp } from './app';
 import { connectDb, disconnectDb } from './config/db';
 import { env } from './config/env';
 import { logger } from './config/logger';
+import { startReminderJob } from './jobs/reminders.job';
 import { User } from './models/user.model';
 
 async function main(): Promise<void> {
@@ -24,8 +25,11 @@ async function main(): Promise<void> {
     logger.info(`DukaanSathi API listening on http://localhost:${env.PORT}/api`);
   });
 
+  const reminderJob = startReminderJob();
+
   const shutdown = async (signal: string) => {
     logger.info(`${signal} received, shutting down`);
+    void reminderJob?.stop();
     server.close();
     await disconnectDb();
     process.exit(0);

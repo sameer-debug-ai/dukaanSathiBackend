@@ -4,7 +4,7 @@ import * as misc from '../controllers/misc.controller';
 import * as products from '../controllers/product.controller';
 import * as suppliers from '../controllers/supplier.controller';
 import { requireAuth } from '../middlewares/auth';
-import { aiLimiter } from '../middlewares/rateLimit';
+import { aiLimiter, publicLimiter, sttLimiter } from '../middlewares/rateLimit';
 import { validate } from '../middlewares/validate';
 import { asyncHandler as h } from '../utils/asyncHandler';
 import { dateRangeQuery, idParams, listQuery, objectId } from '../validators/common';
@@ -46,6 +46,9 @@ router.get('/health', (_req, res) => {
 
 router.use('/auth', authRoutes);
 
+// Customer's read-only khata page: no login, the unguessable token is the key.
+router.get('/public/khata/:token', publicLimiter, h(customers.publicKhataView));
+
 // Everything below is tenant data: login required, and services scope every query by shopId.
 router.use(requireAuth);
 
@@ -73,6 +76,11 @@ router.delete('/customers/:id', id, h(customers.remove));
 router.get('/customers/:id/ledger', id, validate(ledgerQuery, 'query'), h(customers.ledger));
 router.post('/customers/:id/ledger/credit', id, validate(addCreditSchema), h(customers.addCredit));
 router.post('/customers/:id/ledger/payment', id, validate(addPaymentSchema), h(customers.addPayment));
+router.post('/customers/:id/reminder-sent', id, h(customers.reminderSent));
+router.get('/customers/:id/share-link', id, h(customers.shareLinkStatus));
+router.post('/customers/:id/share-link', id, h(customers.shareLinkCreate));
+router.delete('/customers/:id/share-link', id, h(customers.shareLinkRevoke));
+router.get('/reminders/today', h(customers.remindersToday));
 
 // Suppliers, purchases, payments
 router.get('/suppliers', validate(supplierListQuery, 'query'), h(suppliers.list));
@@ -100,6 +108,7 @@ router.get('/reports/:name', validate(dateRangeQuery.extend({ format: z.enum(['j
 // AI voice assistant
 router.get('/ai/status', h(misc.aiStatus));
 router.post('/ai/parse-command', aiLimiter, validate(misc.parseCommandSchema), h(misc.parseCommand));
+router.post('/ai/transcribe', sttLimiter, misc.audioBody, h(misc.transcribe));
 router.get('/voice-logs', validate(listQuery.extend({ status: z.string().optional() }), 'query'), h(misc.listLogs));
 router.patch('/voice-logs/:id', id, validate(misc.voiceLogPatchSchema), h(misc.patchLog));
 router.post('/ai/execute-batch', validate(misc.executeBatchSchema), h(misc.executeBatch));

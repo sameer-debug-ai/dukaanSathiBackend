@@ -13,6 +13,7 @@ import type {
   CustomerListQuery,
   UpdateCustomerInput,
 } from '../validators/customer.validators';
+import { creditScoreOf, creditScoresFor } from './creditScore.service';
 import { addLedgerEntry, computeRunningBalance, sumLedger } from './ledger.service';
 import { recordVoiceEffect } from './voiceEffects';
 
@@ -44,8 +45,9 @@ export async function listCustomers(shopId: Types.ObjectId, q: CustomerListQuery
       { $group: { _id: null, outstanding: { $sum: '$currentBalance' }, dueCount: { $sum: 1 } } },
     ]),
   ]);
+  const scores = await creditScoresFor(shopId, docs.map((d) => d._id));
   return {
-    items: docs.map((d) => d.toJSON()),
+    items: docs.map((d) => ({ ...d.toJSON(), credit: scores.get(String(d._id)) })),
     meta: { ...pageMeta(page, total), outstanding: totals[0]?.outstanding ?? 0, dueCount: totals[0]?.dueCount ?? 0 },
   };
 }
@@ -65,6 +67,7 @@ export async function customerDetail(shopId: Types.ObjectId, id: string) {
   const by = (t: string) => stats.find((s) => s._id === t);
   return {
     ...customer.toJSON(),
+    credit: await creditScoreOf(shopId, customer._id),
     stats: {
       totalCredit: by('credit')?.total ?? 0,
       totalPaid: by('payment')?.total ?? 0,

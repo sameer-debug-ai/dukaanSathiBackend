@@ -8,16 +8,21 @@ import { Supplier } from '../models/supplier.model';
 import { User } from '../models/user.model';
 import { VoiceCommandLog } from '../models/voiceCommandLog.model';
 import { stockAlerts, stockStatusOf } from '../services/product.service';
+import { creditWarningFor, type CreditWarning } from '../services/creditScore.service';
+import { runAnalytics } from '../services/voiceAnalytics.service';
 import { lastUndoableVoiceLog } from '../services/voiceUndo.service';
 import { addDays, endOfIstDay, istDayKey, parseIstDay, startOfIstDay } from '../utils/istDate';
 import { formatInr, lineTotal } from '../utils/money';
+import { detectAnalytics } from './analyticsRules';
 import { ClaudeProvider } from './claude.provider';
 import { applyContext, describeTurn, isResetCommand, loadConversation, rewriteFollowUp, type ConversationTurn } from './conversation';
 import { detectReplyLang } from './detectLang';
+import { fastParse } from './fastParse';
 import { emptyCommand, validateParsedBatch, type Intent, type ParsedCommand } from './intentSchema';
 import { EntityMatcher, type EntityMatch, type MatchTarget } from './matcher';
 import { AiProviderError, type AiProvider, type ShopContext } from './provider';
 import { ruleParseMany, titleCase } from './ruleParser';
+import { getSttProvider } from './stt';
 import { devanagariToRoman } from './transliterate';
 
 /** Swap the provider here (or inject one in tests). */
@@ -27,6 +32,8 @@ export const setAiProvider = (p: AiProvider) => {
 };
 
 export type Lang = 'hi' | 'en';
+/** How a command was parsed: the local fast rules, the AI, or the offline parser (no AI / AI failed). */
+export type ParsePath = 'rule' | 'ai' | 'offline';
 
 export interface ResolvedItem {
   spokenName: string;
@@ -42,6 +49,7 @@ export interface VoiceParseResult {
   text: string;
   engine: 'ai' | 'rules';
   engineNote?: string;
+  parsePath: ParsePath;
   /** Language the command was spoken in; answers and spoken replies use it. */
   replyLang: Lang;
   intent: Intent;
@@ -71,6 +79,8 @@ export interface VoiceParseResult {
   autoSaveConfidence: number;
   /** Save straight away (shop turned "always ask" off, and the command is clear enough). */
   autoSave: boolean;
+  /** New udhaar would cross the customer's credit limit, or the customer is "Risky": warn, never auto-save. */
+  creditWarning?: CreditWarning;
   /**
    * Only when one sentence held several entries to save: each resolved on its own (the
    * top-level fields repeat the first). They share `logId` and are saved together.
@@ -166,13 +176,21 @@ export async function parseVoiceCommand(shopId: Types.ObjectId, rawText: string,
   let actions: ParsedCommand[];
   let engine: 'ai' | 'rules' = 'rules';
   let engineNote: string | undefined;
+  let parsePath: ParsePath = 'offline';
+  const fast = provider.isAvailable() ? fastParse(text, matchers) : null;
   if (isResetCommand(text)) {
     // "naya" / "reset": nothing to parse, just start a fresh conversation.
     actions = [{ ...emptyCommand('reset_context'), confidence: 1 }];
+    parsePath = 'rule';
+  } else if (fast) {
+    // "Sharma ji 500 udhaar": simple and certain, no AI call needed.
+    actions = [fast];
+    parsePath = 'rule';
   } else if (provider.isAvailable()) {
     try {
       actions = await parseWithAi(text, toContext(data), turns.map(describeTurn));
       engine = 'ai';
+      parsePath = 'ai';
     } catch (err) {
       logger.warn('AI parse failed, using offline parser', err instanceof Error ? err.message : err);
       engineNote = err instanceof Error ? err.message : 'AI unavailable';
@@ -192,6 +210,7 @@ export async function parseVoiceCommand(shopId: Types.ObjectId, rawText: string,
     r.replyLang = replyLang;
     r.engine = engine;
     r.engineNote = engineNote;
+    r.parsePath = parsePath;
   }
   // A copy, so the first action is not nested inside itself.
   const result: VoiceParseResult = { ...resolved[0]! };
@@ -224,6 +243,7 @@ export async function parseVoiceCommand(shopId: Types.ObjectId, rawText: string,
     intent: parsed.intent,
     parsedJson: result.actions ? { ...stored(result), actions: resolved.map(stored) } : stored(result),
     engine,
+    parsePath,
     status: parsed.intent === 'unknown' ? 'failed' : isQuery ? 'confirmed' : 'pending',
     resultMessage: result.answer ?? '',
   });
@@ -255,6 +275,9 @@ function offlineParse(
   matchers: { customers: EntityMatcher; suppliers: EntityMatcher; products: EntityMatcher },
   turns: ConversationTurn[],
 ): ParsedCommand[] {
+  // "Sabse zyada udhaar kiska hai?": one of the predefined analytics questions.
+  const analytics = detectAnalytics(text);
+  if (analytics) return [{ ...emptyCommand('query_analytics'), analytics, confidence: 0.8 }];
   const rewritten = rewriteFollowUp(text, turns, matchers);
   if (rewritten !== text) {
     const parsed = ruleParseMany(rewritten, matchers);
@@ -289,6 +312,7 @@ async function resolve(
     logId: '',
     text,
     engine: 'rules',
+    parsePath: 'offline',
     replyLang: lang,
     intent: parsed.intent,
     confidence: parsed.confidence,
@@ -356,6 +380,18 @@ async function resolve(
     case 'query_summary':
       await answerQuery(shopId, parsed, res, data, lang);
       break;
+    case 'query_analytics': {
+      // Read-only: one predefined, shop-scoped query function with clamped parameters.
+      const req = parsed.analytics ?? detectAnalytics(text);
+      if (!req) {
+        res.answer = t(lang, "Sorry, I can't answer that question yet.", 'माफ़ कीजिए, इस सवाल का जवाब अभी नहीं दे सकता।');
+        break;
+      }
+      const out = await runAnalytics(shopId, req, lang);
+      res.answer = out.answer;
+      res.answerData = out.data;
+      break;
+    }
     case 'undo_last': {
       // "galti ho gayi": point the app at the entry to reverse; it calls /ai/undo/:logId.
       res.needsConfirmation = false;
@@ -378,6 +414,11 @@ async function resolve(
       );
       break;
   }
+  // Udhaar for a known customer: warn when it crosses their limit or they are "Risky".
+  if (givesCredit && res.needsConfirmation && res.customer?.best && res.customer.status !== 'not_found') {
+    const warning = await creditWarningFor(shopId, res.customer.best.id, res.amount ?? 0);
+    if (warning) res.creditWarning = warning;
+  }
   return res;
 }
 
@@ -391,7 +432,7 @@ const AUTO_SAVE_INTENTS = new Set(['add_credit', 'receive_payment', 'add_sale', 
  */
 export function scoreCommand(res: VoiceParseResult): { confidence: number; eligible: boolean } {
   const scores: number[] = [];
-  let clean = AUTO_SAVE_INTENTS.has(res.intent) && res.needsConfirmation && res.missing.length === 0 && !res.newCustomerName;
+  let clean = AUTO_SAVE_INTENTS.has(res.intent) && res.needsConfirmation && res.missing.length === 0 && !res.newCustomerName && !res.creditWarning;
   const requireMatch = (m: EntityMatch | undefined) => {
     if (!m || m.status !== 'matched' || !m.best) clean = false;
     else scores.push(m.best.score);
@@ -579,4 +620,7 @@ export async function listVoiceLogs(shopId: Types.ObjectId, q: { page: number; l
   return { items: docs.map((d) => d.toJSON()), total };
 }
 
-export const aiEngineStatus = () => ({ provider: provider.name, available: provider.isAvailable() });
+export const aiEngineStatus = () => {
+  const stt = getSttProvider();
+  return { provider: provider.name, available: provider.isAvailable(), stt: { provider: stt.name, available: stt.isAvailable() } };
+};

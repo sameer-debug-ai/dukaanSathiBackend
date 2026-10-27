@@ -1,6 +1,7 @@
-import type { Request, Response } from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { aiEngineStatus, listVoiceLogs, parseVoiceCommand, updateVoiceLog } from '../ai/ai.service';
+import { getSttProvider, STT_AUDIO_TYPES, STT_MAX_BYTES, SttError } from '../ai/stt';
 import { env } from '../config/env';
 import { shopIdOf } from '../middlewares/auth';
 import { dashboardCharts, dashboardSummary } from '../services/dashboard.service';
@@ -63,6 +64,31 @@ export async function parseCommand(req: Request, res: Response) {
 }
 export async function aiStatus(_req: Request, res: Response) {
   return ok(res, aiEngineStatus());
+}
+
+/** Raw audio body for /ai/transcribe only (everything else stays JSON), with friendly limit errors. */
+const rawAudio = express.raw({ type: (req) => STT_AUDIO_TYPES.includes(String(req.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase()), limit: STT_MAX_BYTES });
+export function audioBody(req: Request, res: Response, next: NextFunction) {
+  rawAudio(req, res, (err?: unknown) => {
+    if ((err as { type?: string } | undefined)?.type === 'entity.too.large') return next(new AppError(413, 'Recording is too long. Please keep it under 30 seconds.'));
+    next(err);
+  });
+}
+
+/** High-accuracy speech-to-text: audio in, text out. The app then sends the text to /ai/parse-command. */
+export async function transcribe(req: Request, res: Response) {
+  const stt = getSttProvider();
+  if (!stt.isAvailable()) throw new AppError(503, 'High accuracy mode is not set up on this server (STT_PROVIDER)');
+  if (!Buffer.isBuffer(req.body)) throw new AppError(415, 'Send the recording as audio (webm, mp4, ogg, mp3 or wav)');
+  if (req.body.length < 1000) throw AppError.badRequest('The recording is empty. Please try again.');
+  const lang = req.query.lang === 'en' ? 'en' : 'hi';
+  try {
+    const text = await stt.transcribe({ audio: req.body, mimeType: String(req.headers['content-type']), lang });
+    return ok(res, { text: text.replace(/\s+/g, ' ').trim().slice(0, 500), provider: stt.name });
+  } catch (err) {
+    if (err instanceof SttError) throw new AppError(err.status, err.message);
+    throw err;
+  }
 }
 
 export const voiceLogPatchSchema = z.object({

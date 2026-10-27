@@ -29,6 +29,7 @@
     "mongodb-memory-server": "^10.4.3",
     "mongoose": "^8.24.7",
     "morgan": "^1.12.1",
+    "node-cron": "^4.6.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

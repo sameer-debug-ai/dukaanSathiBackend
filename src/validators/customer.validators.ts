@@ -7,6 +7,9 @@ const customerBase = z.object({
   phone: indianPhoneOptional,
   address: trimmed(300).default(''),
   creditLimit: paise.optional(),
+  reminderEveryDays: z.union([z.literal(0), z.literal(7), z.literal(15), z.literal(30)]).optional(),
+  /** null clears a due date. */
+  dueDate: z.coerce.date().nullable().optional(),
 });
 
 export const createCustomerSchema = customerBase.extend({

@@ -30,6 +30,8 @@ const voiceCommandLogSchema = new Schema(
     status: { type: String, enum: VOICE_STATUSES, default: 'pending' },
     /** Which parser produced the result: the AI provider or the offline rule-based fallback. */
     engine: { type: String, default: 'ai' },
+    /** rule = local fast parser (no AI call), ai = the AI, offline = offline parser (no AI key / AI failed). */
+    parsePath: { type: String, enum: ['rule', 'ai', 'offline'] },
     resultMessage: { type: String, default: '' },
     error: { type: String },
     effects: { type: [voiceEffectSchema], default: [] },

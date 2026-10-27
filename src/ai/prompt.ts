@@ -23,6 +23,14 @@ For each action choose one intent:
 - query_balance: "Sharma ji ka kitna udhaar baaki hai?"
 - query_stock: "cheeni kitni bachi hai?" (queryType "product", productName "cheeni"), "kya kya khatam hone wala hai?" / "low stock aur out of stock items" (queryType "low_stock": both low and out). Only items already finished, e.g. "kya kya khatam ho gaya?", "out of stock items batao" -> queryType "out_of_stock".
 - query_summary: "aaj kitni bikri hui?" -> period "today". "is hafte" -> "week", "is mahine" -> "month", "kal" -> "yesterday".
+- query_analytics: a business question answered by one fixed report. Fill "analytics" with fn and its parameters, nothing else:
+  - fn "top_products": best sellers. "Is mahine sabse zyada kya bika?" -> period "this_month". "top 3 items is hafte" -> period "this_week", limit 3.
+  - fn "inactive_debtors": customers with udhaar who stopped paying. "Kaun 2 mahine se paisa nahi de raha?" -> days 60. "ek hafte se" -> 7. No number -> days null.
+  - fn "compare_sales": sales vs the period before, and why. "Aaj kal se kam bikri kyun hui?" -> period "today". "Is hafte bikri kam kyun hai?" -> "this_week".
+  - fn "profit": "Is hafte kitna munafa hua?" -> period "this_week". "aaj kitna profit hua" -> "today".
+  - fn "top_debtors": "Sabse zyada udhaar kiska hai?", "kaun sabse zyada udhaar rakhta hai?"
+  Periods: "today", "yesterday", "this_week" (is hafte / last 7 days), "last_week" (pichhle hafte), "this_month" (is mahine), "last_month" (pichhle mahine); null if not said.
+  Plain totals ("aaj kitni bikri hui?") stay query_summary; one person's balance stays query_balance. For every other intent "analytics" is null.
 - undo_last: reverse the previous voice entry. "galti ho gayi", "pichhla wala hatao", "undo karo", "cancel karo", "last entry delete karo", "that was wrong, undo". No other fields.
 - reset_context: start a fresh conversation, forget earlier names. "naya", "nayi shuruaat", "reset karo", "start over". No other fields.
 - unknown: anything else or too unclear.

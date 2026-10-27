@@ -1,4 +1,5 @@
 ﻿import { z } from 'zod';
+import { VPA_RX } from '../utils/upi';
 
 /** Indian mobile: 10 digits starting 6-9. Accepts +91 / 0 prefixes and strips them. */
 export const phoneSchema = z
@@ -44,6 +45,8 @@ export const updateProfileSchema = z
         voiceAlwaysConfirm: z.boolean(),
         voiceAutoSaveThreshold: z.number().min(0.5).max(1),
         voiceUndoSeconds: z.number().int().min(10).max(600),
+        upiId: z.string().trim().max(100).regex(VPA_RX, 'Enter a valid UPI ID, e.g. shopname@okaxis').or(z.literal('')),
+        upiPayeeName: z.string().trim().max(60),
       })
       .partial(),
   })

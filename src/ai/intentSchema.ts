@@ -12,6 +12,7 @@ export const INTENTS = [
   'query_balance',
   'query_stock',
   'query_summary',
+  'query_analytics',
   'undo_last',
   'reset_context',
   'unknown',
@@ -27,6 +28,39 @@ const ParsedItem = z.object({
   rate: z.number().nullable().describe('Price per unit in paise, if spoken'),
   total: z.number().nullable().describe('Line total in paise, if spoken (e.g. "50 kilo aata 1500 ka" -> 150000)'),
 });
+
+/**
+ * Analytics questions are answered by fixed, shop-scoped query functions; the AI only picks
+ * one and its parameters (it never writes a database query).
+ */
+export const ANALYTICS_FUNCTIONS = ['top_products', 'inactive_debtors', 'compare_sales', 'profit', 'top_debtors'] as const;
+export type AnalyticsFn = (typeof ANALYTICS_FUNCTIONS)[number];
+export const ANALYTICS_PERIODS = ['today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month'] as const;
+export type AnalyticsPeriod = (typeof ANALYTICS_PERIODS)[number];
+
+/** What the app works with: null = not said. */
+export interface AnalyticsRequest {
+  fn: AnalyticsFn;
+  period: AnalyticsPeriod | null;
+  days: number | null;
+  limit: number | null;
+}
+
+/**
+ * What the AI fills. Structured outputs allow only 16 nullable fields in the whole schema, so this
+ * object is never null: fn "none" = not an analytics question, period "none" / 0 = not said.
+ */
+const AnalyticsOutput = z.object({
+  fn: z
+    .enum([...ANALYTICS_FUNCTIONS, 'none'])
+    .describe(
+      'top_products: best sellers in a period. inactive_debtors: customers with udhaar who have not paid for `days` days. compare_sales: a period vs the one before it, and why it changed. profit: profit in a period. top_debtors: who owes the most. none: not an analytics question.',
+    ),
+  period: z.enum([...ANALYTICS_PERIODS, 'none']).describe('Time range for top_products / compare_sales / profit; "none" if not said'),
+  days: z.number().describe('inactive_debtors only: days without payment ("2 mahine" -> 60); 0 if not said'),
+  limit: z.number().describe('How many rows if a number was asked ("top 3"); 0 if not said'),
+});
+const NO_ANALYTICS = { fn: 'none', period: 'none', days: 0, limit: 0 } as const;
 
 /**
  * Flat, all-fields-present shape so structured outputs can guarantee it.
@@ -51,10 +85,11 @@ export const ParsedCommandSchema = z.object({
     .boolean()
     .describe('true when the WHOLE pending balance was paid/cleared ("sara udhaar de diya", "hisaab clear"); amount is then null'),
   note: z.string().nullable(),
+  analytics: AnalyticsOutput.describe('Only for query_analytics; otherwise fn "none"'),
   confidence: z.number().describe('0 to 1: how sure you are about the intent and values'),
 });
 
-export type ParsedCommand = z.infer<typeof ParsedCommandSchema>;
+export type ParsedCommand = Omit<z.infer<typeof ParsedCommandSchema>, 'analytics'> & { analytics: AnalyticsRequest | null };
 
 /** Most actions one sentence may carry ("Sharma ji ke 500 likho aur Gupta ji ne 200 de diye"). */
 export const MAX_ACTIONS = 5;
@@ -82,12 +117,19 @@ export const emptyCommand = (intent: Intent = 'unknown'): ParsedCommand => ({
   queryType: null,
   settleFull: false,
   note: null,
+  analytics: null,
   confidence: 0,
 });
 
 /** Validates provider output and enforces invariants JSON schema can't express. */
 export function validateParsedCommand(raw: unknown): { ok: true; value: ParsedCommand } | { ok: false; error: string } {
-  const result = ParsedCommandSchema.safeParse(raw);
+  // `analytics` is newer than the other fields: missing / null (and null inside it) mean "not said".
+  let input = raw;
+  if (raw && typeof raw === 'object') {
+    const a = (raw as { analytics?: Partial<Record<keyof AnalyticsRequest, unknown>> | null }).analytics;
+    input = { ...raw, analytics: a ? { fn: a.fn ?? 'none', period: a.period ?? 'none', days: a.days ?? 0, limit: a.limit ?? 0 } : NO_ANALYTICS };
+  }
+  const result = ParsedCommandSchema.safeParse(input);
   if (!result.success) return { ok: false, error: result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') };
   const v = result.data;
   const money = (n: number | null) => (n === null ? null : Math.max(0, Math.round(n)));
@@ -102,6 +144,15 @@ export function validateParsedCommand(raw: unknown): { ok: true; value: ParsedCo
         .filter((i) => i.name.trim() && i.qty > 0)
         .map((i) => ({ ...i, rate: money(i.rate), total: money(i.total), qty: Math.round(i.qty * 1000) / 1000 })),
       date: v.date && /^\d{4}-\d{2}-\d{2}$/.test(v.date) ? v.date : null,
+      analytics:
+        v.intent === 'query_analytics' && v.analytics.fn !== 'none'
+          ? {
+              fn: v.analytics.fn,
+              period: v.analytics.period === 'none' ? null : v.analytics.period,
+              days: v.analytics.days > 0 ? Math.min(365, Math.max(7, Math.round(v.analytics.days))) : null,
+              limit: v.analytics.limit > 0 ? Math.min(10, Math.max(1, Math.round(v.analytics.limit))) : null,
+            }
+          : null,
       confidence: Math.min(1, Math.max(0, v.confidence)),
     },
   };

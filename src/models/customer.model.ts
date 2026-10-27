@@ -13,6 +13,11 @@ const customerSchema = new Schema(
     /** Cached from the ledger, in paise. Positive = customer owes the shop. */
     currentBalance: { type: Number, default: 0 },
     lastTransactionAt: { type: Date },
+    /** Udhaar reminders: every N days (0 = off) and/or on a promised due date. */
+    reminderEveryDays: { type: Number, enum: [0, 7, 15, 30], default: 0 },
+    dueDate: { type: Date },
+    /** When a payment reminder was last sent (WhatsApp from the app). */
+    lastReminderAt: { type: Date },
     isDeleted: { type: Boolean, default: false },
   },
   { timestamps: true },
