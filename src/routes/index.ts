@@ -1,10 +1,11 @@
 import { Router } from 'express';
+import * as billScan from '../controllers/billScan.controller';
 import * as customers from '../controllers/customer.controller';
 import * as misc from '../controllers/misc.controller';
 import * as products from '../controllers/product.controller';
 import * as suppliers from '../controllers/supplier.controller';
 import { requireAuth } from '../middlewares/auth';
-import { aiLimiter, publicLimiter, sttLimiter } from '../middlewares/rateLimit';
+import { aiLimiter, publicLimiter, scanLimiter, sttLimiter } from '../middlewares/rateLimit';
 import { validate } from '../middlewares/validate';
 import { asyncHandler as h } from '../utils/asyncHandler';
 import { dateRangeQuery, idParams, listQuery, objectId } from '../validators/common';
@@ -109,6 +110,12 @@ router.get('/reports/:name', validate(dateRangeQuery.extend({ format: z.enum(['j
 router.get('/ai/status', h(misc.aiStatus));
 router.post('/ai/parse-command', aiLimiter, validate(misc.parseCommandSchema), h(misc.parseCommand));
 router.post('/ai/transcribe', sttLimiter, misc.audioBody, h(misc.transcribe));
+
+// Bill photo -> purchase draft (Claude vision); the photo is kept and shown with the purchase.
+router.post('/ai/scan-bill', scanLimiter, billScan.imageBody, h(billScan.scanBill));
+router.get('/bill-images/:id', id, h(billScan.image));
+router.post('/bill-images/:id/attach', id, validate(billScan.attachSchema), h(billScan.attach));
+router.get('/purchases/:id/bill-image', id, h(billScan.purchaseImage));
 router.get('/voice-logs', validate(listQuery.extend({ status: z.string().optional() }), 'query'), h(misc.listLogs));
 router.patch('/voice-logs/:id', id, validate(misc.voiceLogPatchSchema), h(misc.patchLog));
 router.post('/ai/execute-batch', validate(misc.executeBatchSchema), h(misc.executeBatch));

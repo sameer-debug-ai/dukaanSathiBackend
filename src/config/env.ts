@@ -18,6 +18,21 @@ const envSchema = z.object({
   STT_API_KEY: z.string().optional().default(''),
   STT_BASE_URL: z.string().optional().default(''),
   STT_MODEL: z.string().optional().default(''),
+  // Bill photo -> purchase (Claude vision). Empty = use AI_MODEL.
+  AI_VISION_MODEL: z.string().optional().default(''),
+  BILL_SCAN_MAX_MB: z.coerce.number().positive().max(20).default(4),
+  // Where bill photos are kept: a local folder, or any S3-compatible bucket (AWS S3, Cloudflare R2, MinIO).
+  STORAGE_PROVIDER: z.enum(['local', 's3']).default('local'),
+  UPLOAD_DIR: z.string().default('uploads'),
+  S3_BUCKET: z.string().optional().default(''),
+  S3_REGION: z.string().optional().default('auto'),
+  S3_ENDPOINT: z.string().optional().default(''),
+  S3_ACCESS_KEY_ID: z.string().optional().default(''),
+  S3_SECRET_ACCESS_KEY: z.string().optional().default(''),
+  S3_FORCE_PATH_STYLE: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true'),
   // Daily "Aaj ke reminders" job (cron syntax, Asia/Kolkata). Empty turns it off.
   REMINDER_CRON: z.string().default('0 9 * * *'),
   CLIENT_URL: z.string().default('http://localhost:4200'),

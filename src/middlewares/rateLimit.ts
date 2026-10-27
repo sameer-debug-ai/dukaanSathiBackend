@@ -49,3 +49,13 @@ export const aiLimiter = rateLimit({
   keyGenerator: (req: Request) => (req.auth ? String(req.auth.shopId) : req.ip ?? 'anon'),
   message: json('Too many voice commands. Please wait a minute and try again.'),
 });
+
+/** Bill photo scans (vision calls are the most expensive AI request): limit per shop. */
+export const scanLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 6,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => (req.auth ? String(req.auth.shopId) : req.ip ?? 'anon'),
+  message: json('Too many bill photos. Please wait a minute and try again.'),
+});
