@@ -213,12 +213,13 @@ export async function createPurchase(shopId: Types.ObjectId, input: CreatePurcha
       { session },
     );
 
-    for (const item of items) {
+    for (const [idx, item] of items.entries()) {
       await applyStockChange(
         {
           shopId,
           productId: item.productId,
           quantity: item.qty,
+          expiryDate: input.items[idx]?.expiryDate,
           type: 'purchase',
           referenceType: 'purchase',
           referenceId: purchaseId,

@@ -20,6 +20,8 @@ const shopSettingsSchema = new Schema(
     upiId: { type: String, trim: true, default: '' },
     /** Name shown in the customer's UPI app (defaults to the shop name). */
     upiPayeeName: { type: String, trim: true, default: '' },
+    /** Auto reorder list: order enough stock for this many days. */
+    reorderDays: { type: Number, default: 15, min: 3, max: 90 },
   },
   { _id: false },
 );

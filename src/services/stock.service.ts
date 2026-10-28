@@ -2,6 +2,7 @@ import type { ClientSession, Types } from 'mongoose';
 import { Product, type ProductDoc } from '../models/product.model';
 import { StockMovement, type MovementType } from '../models/stockMovement.model';
 import { AppError } from '../utils/AppError';
+import { syncBatches } from './batch.service';
 import { getPageParams, pageMeta } from '../utils/pagination';
 import { resolveRange } from '../utils/istDate';
 
@@ -18,6 +19,10 @@ export interface StockChange {
   note?: string;
   userId?: string;
   date?: Date;
+  /** Expiry-tracked products only: expiry of the stock added. */
+  expiryDate?: Date | null;
+  /** Expiry-tracked products only: take from this batch first. */
+  batchId?: string;
 }
 
 /**
@@ -61,6 +66,13 @@ export async function applyStockChange(change: StockChange, session?: ClientSess
     ],
     { session, timestamps: false },
   );
+  // Expiry-tracked products keep their batches in step (FEFO); others are untouched.
+  if (product.trackExpiry) {
+    await syncBatches(
+      { shopId: change.shopId, productId: product._id, quantity: qty, type: change.type, expiryDate: change.expiryDate, batchId: change.batchId, referenceType: change.referenceType, referenceId: change.referenceId, note: change.note },
+      session,
+    );
+  }
   return product;
 }
 

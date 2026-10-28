@@ -16,6 +16,7 @@ const productBase = z.object({
   imageUrl: z.string().trim().url().optional().or(z.literal('')),
   supplierId: objectId.optional().or(z.literal('').transform(() => undefined)),
   isActive: z.boolean().default(true),
+  trackExpiry: z.boolean().optional(),
 });
 
 export const createProductSchema = productBase.extend({
@@ -57,9 +58,18 @@ export const adjustStockSchema = z.object({
   note: trimmed(300).default(''),
   /** Set when the voice assistant changes stock; lets it be undone. */
   voiceLogId: objectId.optional(),
+  /** Expiry-tracked products: remove from this batch first (writing off an expired batch). */
+  batchId: objectId.optional(),
+  /** Expiry-tracked products: expiry of the stock being added. */
+  expiryDate: z.coerce.date().nullable().optional(),
 });
 
 export const stockHistoryQuery = listQuery.merge(dateRangeQuery);
+
+export const runOutQuery = z.object({ days: z.coerce.number().int().min(1).max(60).default(7) });
+export const reorderQuery = z.object({ days: z.coerce.number().int().min(3).max(90).optional() });
+export const expiryQuery = z.object({ days: z.coerce.number().int().min(1).max(90).default(7) });
+export const barcodeParams = z.object({ code: z.string().trim().min(1).max(60) });
 
 export type CreateProductInput = z.infer<typeof createProductSchema>;
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;

@@ -21,6 +21,8 @@ const productSchema = new Schema(
     currentStock: { type: Number, default: 0 },
     lowStockThreshold: { type: Number, default: 5, min: 0 },
     barcode: { type: String, trim: true },
+    /** "Expiry track karo": keep stock in batches with expiry dates (see ProductBatch). */
+    trackExpiry: { type: Boolean, default: false },
     imageUrl: { type: String, trim: true },
     supplierId: { type: Schema.Types.ObjectId, ref: 'Supplier' },
     isActive: { type: Boolean, default: true },

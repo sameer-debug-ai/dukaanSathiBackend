@@ -80,6 +80,7 @@ requires `Authorization: Bearer <token>` and is scoped to the logged-in shop.
 | Voice | `POST /api/ai/parse-command` (rate limited), `POST /api/ai/transcribe` (audio, rate limited), `POST /api/ai/execute-batch`, `POST /api/ai/undo/:id` `undo-last`, `GET /api/ai/status`, `GET /api/voice-logs`, `PATCH /api/voice-logs/:id` |
 | Settings | `GET /api/settings/backup`, `GET /api/settings/data-counts`, `POST /api/settings/sample-data` |
 | Udhaar recovery | `GET /api/reminders/today`, `POST /api/customers/:id/reminder-sent`, `GET/POST/DELETE /api/customers/:id/share-link`, `GET /api/reports/aging` |
+| Smart stock | `GET /api/stock/runout?days=7`, `GET /api/stock/reorder?days=15`, `GET /api/stock/expiry?days=7`, `GET /api/products/barcode/:code`, `GET /api/products/:id/batches` |
 | Public (no login) | `GET /api/public/khata/:token` (rate limited) |
 
 ## Voice assistant
@@ -116,7 +117,7 @@ requires `Authorization: Bearer <token>` and is scoped to the logged-in shop.
 ## Udhaar recovery
 
 - **UPI:** The shop's UPI ID and payee name are stored in `settings.upiId` and `settings.upiPayeeName`.
-  - Links use the NPCI format: `upi://pay?pa=..&pn=..&am=..&cu=INR&tn=..`
+  - Links use the NPCI format: `upi://pay?pa=..&pn=..&am=..&cu=INR`. There is no `tn` note, because on a personal UPI ID it made banks decline QR payments with "duplicate RRN".
   - They appear in WhatsApp reminders, the statement PDF (with a QR code) and the public khata page.
 - **Reminders:** Each customer has `reminderEveryDays` (0, 7, 15 or 30), a `dueDate` and `lastReminderAt`.
   - A `node-cron` job runs daily at 9 AM IST and builds a `DailyReminder` list for each shop.
@@ -138,6 +139,26 @@ requires `Authorization: Bearer <token>` and is scoped to the logged-in shop.
   - **New** means not enough history yet.
   - Voice udhaar for a customer who goes over their credit limit or is **Risky** carries a `creditWarning` and is never auto-saved.
 - **Aging report:** `reports/aging` splits each customer's pending udhaar into 0-30, 31-60, 61-90 and 90+ day buckets, using FIFO.
+
+## Smart stock
+
+- **Run-out forecast** (`prediction.service.ts`):
+  - Net units sold per IST day over the last 30 days come from `StockMovement` sales, minus undone bills.
+  - Each day's weight halves every 10 days back, and days with no sales count as 0.
+  - A product added recently is averaged over the days since it was added, with a minimum of 7 days.
+  - `daysLeft = floor(stock / dailyRate)`; it is `null` when the product is not selling.
+  - Product list, detail and barcode responses carry `forecast: { dailyRate, daysLeft }`.
+  - The voice question "kya kya khatam hone wala hai" also lists items that will run out within 7 days.
+- **Reorder list:**
+  - Quantity is `dailyRate × N days − stock`, rounded up to whole packs, 0.5 kg/litre or 50 g/ml.
+  - Items that stopped selling (often because they ran out) are refilled to twice their low-stock level when at or below it.
+  - Items are grouped by the product's supplier. N comes from `settings.reorderDays` (default 15) or `?days=`.
+- **Expiry batches (FEFO):** Products with `trackExpiry` keep `ProductBatch` documents.
+  - `applyStockChange` keeps them in step for these products only. Stock added creates a batch, with the `expiryDate` from the purchase line if one was given.
+  - Stock removed takes from the earliest-expiry batch first. Batches without an expiry are used last.
+  - `stock/adjust` takes a `batchId` so a write-off removes that batch. Undoing a purchase removes that purchase's batches first.
+  - Turning tracking on turns the current stock into one batch with no expiry. Turning it off deletes the batches.
+  - Products without tracking are untouched.
 
 ## Notes
 

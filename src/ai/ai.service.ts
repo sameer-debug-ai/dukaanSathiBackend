@@ -7,6 +7,7 @@ import { Sale } from '../models/sale.model';
 import { Supplier } from '../models/supplier.model';
 import { User } from '../models/user.model';
 import { VoiceCommandLog } from '../models/voiceCommandLog.model';
+import { runOutList } from '../services/prediction.service';
 import { stockAlerts, stockStatusOf } from '../services/product.service';
 import { creditWarningFor, type CreditWarning } from '../services/creditScore.service';
 import { runAnalytics } from '../services/voiceAnalytics.service';
@@ -559,6 +560,23 @@ async function answerQuery(shopId: Types.ObjectId, parsed: ParsedCommand, res: V
       res.answer = alerts.total
         ? t(lang, `${alerts.outCount} out of stock, ${alerts.lowCount} running low.`, `${alerts.outCount} सामान खत्म, ${alerts.lowCount} कम हैं।`)
         : t(lang, 'All items are well stocked.', 'सभी सामान का स्टॉक ठीक है।');
+      // Smart stock: items still in stock that will run out within a week at the current selling rate.
+      const soon = await runOutList(shopId, 7);
+      if (soon.items.length) {
+        res.answerData = {
+          ...(res.answerData as Record<string, unknown>),
+          soon: soon.items.slice(0, 20).map((i) => ({ id: i.id, name: i.name, stock: i.currentStock, unit: i.unit, daysLeft: i.daysLeft })),
+        };
+        const top = soon.items.slice(0, 3);
+        const more = soon.items.length > 3;
+        res.answer +=
+          ' ' +
+          t(
+            lang,
+            `${soon.items.length} will run out within a week: ${top.map((i) => `${i.name} (${i.daysLeft ? `~${i.daysLeft} days` : 'today'})`).join(', ')}${more ? ' and more' : ''}.`,
+            `${soon.items.length} सामान हफ़्ते भर में खत्म होंगे: ${top.map((i) => `${i.nameHindi || i.name} (${i.daysLeft ? `~${i.daysLeft} दिन` : 'आज ही'})`).join(', ')}${more ? ' और भी' : ''}।`,
+          );
+      }
     }
     return;
   }

@@ -23,6 +23,10 @@ import {
   importProductsSchema,
   productListQuery,
   stockHistoryQuery,
+  runOutQuery,
+  reorderQuery,
+  expiryQuery,
+  barcodeParams,
   updateProductSchema,
 } from '../validators/product.validators';
 import { createSaleSchema, saleListQuery } from '../validators/sale.validators';
@@ -57,15 +61,21 @@ router.use(requireAuth);
 router.get('/products', validate(productListQuery, 'query'), h(products.list));
 router.get('/products/categories', h(products.categories));
 router.get('/products/alerts', h(products.alerts));
+router.get('/products/barcode/:code', validate(barcodeParams, 'params'), h(products.byBarcode));
 router.get('/products/export', validate(productListQuery, 'query'), h(products.exportCsv));
 router.post('/products/import', validate(importProductsSchema), h(products.importRows));
 router.post('/products', validate(createProductSchema), h(products.create));
 router.get('/products/:id', id, h(products.get));
+router.get('/products/:id/batches', id, h(products.batches));
 router.patch('/products/:id', id, validate(updateProductSchema), h(products.update));
 router.delete('/products/:id', id, h(products.remove));
 
 // Stock
 router.post('/stock/adjust', validate(adjustStockSchema), h(products.adjust));
+// Smart stock: run-out forecast, reorder list, expiry alerts.
+router.get('/stock/runout', validate(runOutQuery, 'query'), h(products.runOut));
+router.get('/stock/reorder', validate(reorderQuery, 'query'), h(products.reorder));
+router.get('/stock/expiry', validate(expiryQuery, 'query'), h(products.expiry));
 router.get('/stock/history/:productId', validate(z.object({ productId: objectId }), 'params'), validate(stockHistoryQuery, 'query'), h(products.history));
 
 // Customers + udhaar ledger

@@ -12,6 +12,7 @@ import {
   type ProductListQuery,
   type UpdateProductInput,
 } from '../validators/product.validators';
+import { setTracking } from './batch.service';
 import { applyStockChange } from './stock.service';
 import { recordVoiceEffect } from './voiceEffects';
 
@@ -98,6 +99,7 @@ export async function createProduct(shopId: Types.ObjectId, input: CreateProduct
 export async function updateProduct(shopId: Types.ObjectId, id: string, input: UpdateProductInput) {
   const doc = await Product.findOneAndUpdate({ _id: id, shopId, isDeleted: false }, { $set: input }, { new: true, runValidators: true });
   if (!doc) throw AppError.notFound('Product not found');
+  if (input.trackExpiry !== undefined) await setTracking(shopId, doc._id, input.trackExpiry, doc.currentStock);
   return doc;
 }
 
@@ -134,7 +136,7 @@ export async function adjustStock(shopId: Types.ObjectId, input: AdjustStockInpu
     throw AppError.badRequest(`Only ${product.currentStock} ${product.unit} in stock; cannot remove ${Math.abs(quantity)}`);
   }
   const apply = async (session: ClientSession | undefined) => {
-    const p = await applyStockChange({ shopId, productId: input.productId, quantity, type: input.type, note: input.note, userId }, session);
+    const p = await applyStockChange({ shopId, productId: input.productId, quantity, type: input.type, note: input.note, userId, batchId: input.batchId, expiryDate: input.expiryDate }, session);
     await recordVoiceEffect(shopId, input.voiceLogId, [{ kind: 'stock', productId: p._id, quantity }], session);
     return p;
   };

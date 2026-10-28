@@ -47,6 +47,7 @@ export const updateProfileSchema = z
         voiceUndoSeconds: z.number().int().min(10).max(600),
         upiId: z.string().trim().max(100).regex(VPA_RX, 'Enter a valid UPI ID, e.g. shopname@okaxis').or(z.literal('')),
         upiPayeeName: z.string().trim().max(60),
+        reorderDays: z.number().int().min(3).max(90),
       })
       .partial(),
   })

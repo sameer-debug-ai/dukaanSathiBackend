@@ -40,6 +40,8 @@ const purchaseItem = z
       .optional(),
     qty,
     rate: paise,
+    /** Expiry-tracked products: this lot's expiry date. */
+    expiryDate: z.coerce.date().nullable().optional(),
   })
   .refine((i) => i.productId || i.newProduct, 'Select a product or create a new one');
 
