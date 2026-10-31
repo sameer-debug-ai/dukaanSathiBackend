@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import * as billScan from '../controllers/billScan.controller';
+import * as categories from '../controllers/category.controller';
 import * as customers from '../controllers/customer.controller';
 import * as misc from '../controllers/misc.controller';
 import * as products from '../controllers/product.controller';
@@ -41,6 +42,7 @@ import {
 } from '../validators/supplier.validators';
 import authRoutes from './auth.routes';
 import { z } from 'zod';
+import { createCategorySchema, updateCategorySchema } from '../validators/category.validators';
 
 const router = Router();
 const id = validate(idParams, 'params');
@@ -60,6 +62,12 @@ router.use(requireAuth);
 // Products
 router.get('/products', validate(productListQuery, 'query'), h(products.list));
 router.get('/products/categories', h(products.categories));
+
+// Category management (name + active). The product form's dropdown shows active ones only.
+router.get('/categories', h(categories.list));
+router.get('/categories/active', h(categories.active));
+router.post('/categories', validate(createCategorySchema), h(categories.create));
+router.patch('/categories/:id', id, validate(updateCategorySchema), h(categories.update));
 router.get('/products/alerts', h(products.alerts));
 router.get('/products/barcode/:code', validate(barcodeParams, 'params'), h(products.byBarcode));
 router.get('/products/export', validate(productListQuery, 'query'), h(products.exportCsv));

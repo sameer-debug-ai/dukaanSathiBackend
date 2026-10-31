@@ -49,6 +49,10 @@ const AUTO_ACCEPT = 0.8;
 const MIN_SCORE = 0.45;
 const AMBIGUITY_MARGIN = 0.08;
 const CONTENDER_GAP = 0.15;
+/** Score of a whole-word name hit ("Sameer" in "Sameer Khan"): for people, two of these mean "ask which one". */
+const SAME_NAME = 0.85;
+/** People can share a first name with many others (6 "Sameer"s): list them all, not just the top 5. */
+const MAX_PEOPLE = 15;
 
 /**
  * Fuzzy matcher over customers / suppliers / products. Exact (normalised) name or
@@ -69,7 +73,16 @@ export class EntityMatcher {
       [t.name, ...t.aliases].flatMap((k) => (/[ऀ-ॿ]/.test(k) ? [k, devanagariToRoman(k)] : [k])).map((k) => ({ target: t, key: normalizeName(k), raw: cleanName(k) })).filter((e) => e.key),
     );
     this.fuse = new Fuse(this.entries, { keys: ['key'], includeScore: true, threshold: 0.5, ignoreLocation: true });
+    for (const t of targets) {
+      for (const a of t.aliases.flatMap((k) => (/[ऀ-ॿ]/.test(k) ? [k, devanagariToRoman(k)] : [k]))) {
+        const key = normalizeName(a);
+        if (key) this.aliasOwners.set(key, [...(this.aliasOwners.get(key) ?? []), t.id]);
+      }
+    }
   }
+
+  /** Normalised alias -> ids that carry it. A learned alias ("Sharma" -> Rakesh Sharma) is the shopkeeper's own pick. */
+  private readonly aliasOwners = new Map<string, string[]>();
 
   match(query: string | null | undefined): EntityMatch {
     const scores = new Map<string, Candidate>();
@@ -79,11 +92,16 @@ export class EntityMatcher {
     for (const s of spellings) this.score(s, scores);
     if (!normalizeName(query ?? '')) return { query: query ?? '', status: 'not_found', best: null, candidates: [] };
 
-    const candidates = [...scores.values()].filter((c) => c.score >= MIN_SCORE).sort((a, b) => b.score - a.score).slice(0, 5);
+    const candidates = [...scores.values()].filter((c) => c.score >= MIN_SCORE).sort((a, b) => b.score - a.score).slice(0, this.people ? MAX_PEOPLE : 5);
     const [first, second] = candidates;
     if (!first) return { query: query ?? '', status: 'not_found', best: null, candidates: [] };
 
-    const tie = second && first.score - second.score < AMBIGUITY_MARGIN;
+    // "Sameer" with customers "Sameer" and "Sameer Khan": both carry the spoken name, so the shopkeeper picks.
+    // An alias only the best one carries was taught by the shopkeeper earlier, so it still decides alone.
+    const owners = spellings.flatMap((s) => this.aliasOwners.get(normalizeName(s)) ?? []);
+    const taught = owners.includes(first.id) && owners.every((id) => id === first.id);
+    const sharedName = this.people && !!second && second.score >= SAME_NAME && !taught;
+    const tie = sharedName || (second && first.score - second.score < AMBIGUITY_MARGIN);
     const status: MatchStatus = first.score >= AUTO_ACCEPT && !tie ? 'matched' : 'ambiguous';
     // Offer only real contenders: names close to the best score (two Sharmas), not every weak fuzzy hit.
     const contenders = candidates.filter((c) => c.score >= first.score - CONTENDER_GAP);
