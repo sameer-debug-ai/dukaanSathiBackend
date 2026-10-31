@@ -74,9 +74,10 @@ requires `Authorization: Bearer <token>` and is scoped to the logged-in shop.
 | Customers | `GET/POST /api/customers`, `GET/PATCH/DELETE /api/customers/:id`, `GET /api/customers/:id/ledger`, `POST /api/customers/:id/ledger/credit` `payment` |
 | Suppliers | `GET/POST /api/suppliers`, `GET/PATCH/DELETE /api/suppliers/:id`, `GET /api/suppliers/:id/history` |
 | Purchases | `GET/POST /api/purchases`, `GET /api/purchases/:id`, `GET/POST /api/supplier-payments` |
-| Sales | `GET/POST /api/sales`, `GET /api/sales/:id` |
+| Sales | `GET/POST /api/sales` (`?status=active\|cancelled`), `GET /api/sales/:id`, `POST /api/sales/quote`, `POST /api/sales/:id/cancel` |
+| Bills & GST | `GET/PATCH /api/billing/settings`, `POST /api/billing/gst-by-category` |
 | Dashboard | `GET /api/dashboard/summary`, `GET /api/dashboard/charts?days=7` |
-| Reports | `GET /api/reports/{sales,profit,udhaar,supplier-purchases,stock-valuation,product-sales}?from&to&format=json\|csv` |
+| Reports | `GET /api/reports/{sales,profit,udhaar,supplier-purchases,stock-valuation,product-sales,gst-register,gst-hsn}?from&to&format=json\|csv` |
 | Voice | `POST /api/ai/parse-command` (rate limited), `POST /api/ai/transcribe` (audio, rate limited), `POST /api/ai/execute-batch`, `POST /api/ai/undo/:id` `undo-last`, `GET /api/ai/status`, `GET /api/voice-logs`, `PATCH /api/voice-logs/:id` |
 | Settings | `GET /api/settings/backup`, `GET /api/settings/data-counts`, `POST /api/settings/sample-data` |
 | Udhaar recovery | `GET /api/reminders/today`, `POST /api/customers/:id/reminder-sent`, `GET/POST/DELETE /api/customers/:id/share-link`, `GET /api/reports/aging` |
@@ -159,6 +160,32 @@ requires `Authorization: Bearer <token>` and is scoped to the logged-in shop.
   - `stock/adjust` takes a `batchId` so a write-off removes that batch. Undoing a purchase removes that purchase's batches first.
   - Turning tracking on turns the current stock into one batch with no expiry. Turning it off deletes the batches.
   - Products without tracking are untouched.
+
+## Bills & GST
+
+- **Settings** live on the user as `billing` (name / address / phone overrides, logo as a small
+  data URL, footer, `paperSize`, `showUpiQr`, `invoicePrefix`, `gstEnabled`, `gstin`, `stateCode`,
+  `composition`). GSTINs are checked for format, state code and the mod-36 check character
+  (`utils/gst.ts`).
+- **Invoice numbers:** `BillSequence { shopId, fy }` is bumped with one `$inc` (upsert, retried once
+  on a first-of-year race), giving `PREFIX/2026-27/0001`. The financial year is taken from the
+  bill's IST date. The old numeric `billNumber` is unchanged and still unique.
+- **Maths** (`services/billCalc.ts`, pure, all paise): GST off or composition keeps
+  `total = items - discount`. GST on: the discount is shared over lines by value (largest
+  remainder), inclusive prices give `taxable = round(value * 100 / (100 + rate))`, exclusive ones
+  add `round(taxable * rate / 100)`; CGST = round(tax / 2), SGST = the rest, or all IGST when the
+  buyer's state differs; the total is rounded to the nearest rupee and the difference saved as
+  `roundOff`. A line's `total` is still qty x rate, so existing reports read the same fields.
+  Bills store a seller / buyer snapshot, per-line tax and `taxSummary`, and the API adds
+  `amountInWords` (English + Hindi).
+- **Cancel** (`billing.service.ts`): the sale is marked `status: 'cancelled'` (atomically, so it
+  can't be cancelled twice), each item goes back with a `return` StockMovement, and the udhaar part
+  is reversed with a `payment` ledger entry carrying `reversalOf`. Sales totals, dashboard and
+  reports skip cancelled bills (`NOT_CANCELLED`), and collections skip `reversalOf` entries. Voice
+  undo of a cancelled bill is refused.
+- **GST reports** (`gstReport.service.ts`): register = one row per invoice per rate (B2B / B2C,
+  place of supply, taxable, CGST, SGST, IGST, invoice value); HSN summary = per HSN and rate with
+  UQC codes. Both plug into `/reports/:name`, so CSV export works the same way.
 
 ## Notes
 

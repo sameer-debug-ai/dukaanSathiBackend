@@ -50,6 +50,8 @@ export interface NewLedgerEntry {
   source?: 'manual' | 'voice' | 'sale';
   rawVoiceText?: string;
   saleId?: Types.ObjectId;
+  /** Taking back a cancelled bill's udhaar (not money received). */
+  reversalOf?: Types.ObjectId;
   mode?: 'cash' | 'upi' | 'bank' | null;
   date?: Date;
 }
@@ -78,6 +80,7 @@ export async function addLedgerEntry(input: NewLedgerEntry, session?: ClientSess
         source: input.source ?? 'manual',
         rawVoiceText: input.rawVoiceText,
         saleId: input.saleId,
+        reversalOf: input.reversalOf,
         mode: input.mode ?? null,
         date,
       },

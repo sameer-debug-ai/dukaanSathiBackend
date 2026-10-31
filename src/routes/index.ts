@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import * as billScan from '../controllers/billScan.controller';
+import * as billing from '../controllers/billing.controller';
 import * as categories from '../controllers/category.controller';
 import * as customers from '../controllers/customer.controller';
 import * as misc from '../controllers/misc.controller';
@@ -28,9 +29,11 @@ import {
   reorderQuery,
   expiryQuery,
   barcodeParams,
+  gstByCategorySchema,
   updateProductSchema,
 } from '../validators/product.validators';
-import { createSaleSchema, saleListQuery } from '../validators/sale.validators';
+import { createSaleSchema, quoteSaleSchema, saleListQuery } from '../validators/sale.validators';
+import { cancelSaleSchema, updateBillingSchema } from '../validators/billing.validators';
 import {
   createPurchaseSchema,
   createSupplierPaymentSchema,
@@ -117,7 +120,14 @@ router.post('/supplier-payments', validate(createSupplierPaymentSchema), h(suppl
 // Sales / billing
 router.get('/sales', validate(saleListQuery, 'query'), h(misc.listSales));
 router.post('/sales', validate(createSaleSchema), h(misc.createSale));
+router.post('/sales/quote', validate(quoteSaleSchema), h(billing.quote));
 router.get('/sales/:id', id, h(misc.getSale));
+router.post('/sales/:id/cancel', id, validate(cancelSaleSchema), h(billing.cancel));
+
+// Bill printing + GST settings
+router.get('/billing/settings', h(billing.getSettings));
+router.patch('/billing/settings', validate(updateBillingSchema), h(billing.updateSettings));
+router.post('/billing/gst-by-category', validate(gstByCategorySchema), h(billing.gstByCategory));
 
 // Dashboard + reports
 router.get('/dashboard/summary', h(misc.summary));

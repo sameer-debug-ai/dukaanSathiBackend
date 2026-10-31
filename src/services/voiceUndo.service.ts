@@ -89,6 +89,8 @@ async function reverse(shopId: Types.ObjectId, e: Effect, session: ClientSession
     case 'sale': {
       const sale = await Sale.findOne({ _id: e.id, shopId }).session(s);
       if (!sale) return;
+      // Cancelling already gave the stock and udhaar back; undoing too would do it twice.
+      if (sale.status === 'cancelled') throw AppError.conflict('This bill was cancelled already, so there is nothing to undo');
       for (const item of sale.items) {
         await applyStockChange(
           { shopId, productId: item.productId, quantity: item.qty, type: 'reversal', referenceType: 'sale', referenceId: sale._id, note: `Undo bill #${sale.billNumber}`, userId },

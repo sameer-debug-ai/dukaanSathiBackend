@@ -2,12 +2,13 @@ import type { Types } from 'mongoose';
 import { Customer } from '../models/customer.model';
 import { CustomerLedger } from '../models/customerLedger.model';
 import { Purchase } from '../models/purchase.model';
-import { Sale } from '../models/sale.model';
+import { NOT_CANCELLED, Sale } from '../models/sale.model';
 import { Supplier } from '../models/supplier.model';
 import { SupplierPayment } from '../models/supplierPayment.model';
 import { IST_TIMEZONE, resolveRange } from '../utils/istDate';
 import { openCreditsFor } from './creditScore.service';
 import { stockValuation } from './product.service';
+import { gstHsnReport, gstRegisterReport } from './gstReport.service';
 
 export interface ReportRange {
   from?: string;
@@ -25,7 +26,10 @@ export interface Report {
   chart?: { labels: string[]; series: { label: string; data: number[] }[] };
 }
 
-const dayExpr = { $dateToString: { format: '%Y-%m-%d', date: '$date', timezone: IST_TIMEZONE } };
+/** Ledger entry that takes back a cancelled bill's udhaar (see billing.service cancelSale). */
+const IS_REVERSAL = { $ne: [{ $ifNull: ['$reversalOf', null] }, null] };
+
+const dayExpr ={ $dateToString: { format: '%Y-%m-%d', date: '$date', timezone: IST_TIMEZONE } };
 
 function rangeOf(q: ReportRange) {
   const r = resolveRange(q.from, q.to, 30);
@@ -43,7 +47,7 @@ export async function salesReport(shopId: Types.ObjectId, q: ReportRange): Promi
     upi: number;
     credit: number;
   }>([
-    { $match: { shopId, date: match } },
+    { $match: { shopId, ...NOT_CANCELLED, date: match } },
     {
       $group: {
         _id: dayExpr,
@@ -81,7 +85,7 @@ export async function salesReport(shopId: Types.ObjectId, q: ReportRange): Promi
 export async function profitReport(shopId: Types.ObjectId, q: ReportRange): Promise<Report> {
   const { match } = rangeOf(q);
   const rows = await Sale.aggregate<{ _id: string; revenue: number; cost: number; discount: number }>([
-    { $match: { shopId, date: match } },
+    { $match: { shopId, ...NOT_CANCELLED, date: match } },
     {
       $project: {
         date: 1,
@@ -125,8 +129,9 @@ export async function udhaarReport(shopId: Types.ObjectId, q: ReportRange): Prom
       {
         $group: {
           _id: '$customerId',
-          given: { $sum: { $cond: [{ $eq: ['$type', 'credit'] }, '$amount', 0] } },
-          received: { $sum: { $cond: [{ $eq: ['$type', 'payment'] }, '$amount', 0] } },
+          // A cancelled bill's udhaar coming back is not money received: it takes the udhaar off.
+          given: { $sum: { $cond: [{ $eq: ['$type', 'credit'] }, '$amount', { $cond: [IS_REVERSAL, { $multiply: ['$amount', -1] }, 0] }] } },
+          received: { $sum: { $cond: [{ $and: [{ $eq: ['$type', 'payment'] }, { $not: [IS_REVERSAL] }] }, '$amount', 0] } },
         },
       },
     ]),
@@ -238,7 +243,7 @@ export async function stockValuationReport(shopId: Types.ObjectId): Promise<Repo
 export async function productSalesReport(shopId: Types.ObjectId, q: ReportRange): Promise<Report> {
   const { match } = rangeOf(q);
   const rows = await Sale.aggregate<{ _id: Types.ObjectId; name: string; unit: string; qty: number; revenue: number; cost: number; bills: number }>([
-    { $match: { shopId, date: match } },
+    { $match: { shopId, ...NOT_CANCELLED, date: match } },
     { $unwind: '$items' },
     {
       $group: {
@@ -355,6 +360,8 @@ export const REPORTS = {
   'stock-valuation': (shopId: Types.ObjectId) => stockValuationReport(shopId),
   'product-sales': productSalesReport,
   aging: (shopId: Types.ObjectId) => agingReport(shopId),
+  'gst-register': gstRegisterReport,
+  'gst-hsn': gstHsnReport,
 } as const;
 
 export type ReportName = keyof typeof REPORTS;

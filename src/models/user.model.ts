@@ -26,6 +26,34 @@ const shopSettingsSchema = new Schema(
   { _id: false },
 );
 
+export const PAPER_SIZES = ['58mm', '80mm', 'a4'] as const;
+export type PaperSize = (typeof PAPER_SIZES)[number];
+
+/** What goes on a printed bill. Empty name/address/phone fall back to the shop profile. */
+const billingSettingsSchema = new Schema(
+  {
+    shopName: { type: String, trim: true, default: '' },
+    address: { type: String, trim: true, default: '' },
+    phone: { type: String, trim: true, default: '' },
+    /** Small logo as a data URL (kept in the DB: Render's disk is wiped on every deploy). */
+    logo: { type: String, default: '' },
+    footerNote: { type: String, trim: true, default: '' },
+    paperSize: { type: String, enum: PAPER_SIZES, default: 'a4' },
+    /** UPI QR at the bottom of bills with udhaar / an amount still to pay. */
+    showUpiQr: { type: Boolean, default: true },
+    /** Invoice number prefix: "KGS" -> KGS/2026-27/0001. Empty = initials of the shop name. */
+    invoicePrefix: { type: String, trim: true, uppercase: true, default: '' },
+    /** "Main GST registered hoon". Off = simple bills, exactly as before. */
+    gstEnabled: { type: Boolean, default: false },
+    gstin: { type: String, trim: true, uppercase: true, default: '' },
+    /** Two-digit GST state code, e.g. "27" for Maharashtra. */
+    stateCode: { type: String, trim: true, default: '' },
+    /** Composition scheme: "Bill of Supply", no tax collected or shown. */
+    composition: { type: Boolean, default: false },
+  },
+  { _id: false },
+);
+
 const userSchema = new Schema(
   {
     name: { type: String, required: true, trim: true, maxlength: 100 },
@@ -39,6 +67,7 @@ const userSchema = new Schema(
     settings: { type: shopSettingsSchema, default: () => ({}) },
     refreshTokenHash: { type: String, select: false },
     billCounter: { type: Number, default: 0 },
+    billing: { type: billingSettingsSchema, default: () => ({}) },
   },
   { timestamps: true },
 );

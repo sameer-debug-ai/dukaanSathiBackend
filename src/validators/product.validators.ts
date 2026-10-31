@@ -2,6 +2,16 @@ import { z } from 'zod';
 import { UNITS } from '../models/product.model';
 import { dateRangeQuery, listQuery, objectId, paise, stringList, trimmed } from './common';
 
+const hsnCode = z
+  .string()
+  .trim()
+  .regex(/^(\d{4}|\d{6}|\d{8})?$/, 'HSN code is 4, 6 or 8 digits');
+const gstRate = z.coerce
+  .number()
+  .min(0)
+  .max(100)
+  .transform((v) => Math.round(v * 100) / 100);
+
 const productBase = z.object({
   name: z.string().trim().min(1, 'Product name is required').max(120),
   nameHindi: trimmed(120).default(''),
@@ -17,7 +27,19 @@ const productBase = z.object({
   supplierId: objectId.optional().or(z.literal('').transform(() => undefined)),
   isActive: z.boolean().default(true),
   trackExpiry: z.boolean().optional(),
+  hsnCode: hsnCode.optional(),
+  gstRate: gstRate.optional(),
+  priceIncludesGst: z.boolean().optional(),
 });
+
+/** "Is category ka GST rate sab products pe lagao". Rate: 0, 5, 12, 18, 28 or custom (0.25, 3). */
+export const gstByCategorySchema = z.object({
+  category: z.string().trim().min(1).max(60),
+  gstRate,
+  hsnCode: hsnCode.optional(),
+  priceIncludesGst: z.boolean().optional(),
+});
+export type GstByCategoryInput = z.infer<typeof gstByCategorySchema>;
 
 export const createProductSchema = productBase.extend({
   /** Opening stock is recorded as an 'adjustment' StockMovement. */

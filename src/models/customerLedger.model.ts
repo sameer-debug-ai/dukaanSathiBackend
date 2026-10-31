@@ -26,6 +26,8 @@ const customerLedgerSchema = new Schema(
     source: { type: String, enum: ['manual', 'voice', 'sale'], default: 'manual' },
     rawVoiceText: { type: String },
     saleId: { type: Schema.Types.ObjectId, ref: 'Sale' },
+    /** Set on the entry that takes back a cancelled bill's udhaar: not money received. */
+    reversalOf: { type: Schema.Types.ObjectId, ref: 'Sale' },
     mode: { type: String, enum: ['cash', 'upi', 'bank', null], default: null },
     date: { type: Date, required: true, default: () => new Date() },
   },

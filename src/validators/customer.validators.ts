@@ -1,11 +1,13 @@
 import { z } from 'zod';
-import { dateRangeQuery, indianPhoneOptional, listQuery, objectId, optionalDate, paise, positivePaise, qty, stringList, trimmed } from './common';
+import { dateRangeQuery, gstinOptional, indianPhoneOptional, stateCodeOptional, listQuery, objectId, optionalDate, paise, positivePaise, qty, stringList, trimmed } from './common';
 
 const customerBase = z.object({
   name: z.string().trim().min(1, 'Customer name is required').max(100),
   aliases: stringList,
   phone: indianPhoneOptional,
   address: trimmed(300).default(''),
+  gstin: gstinOptional.optional(),
+  stateCode: stateCodeOptional.optional(),
   creditLimit: paise.optional(),
   reminderEveryDays: z.union([z.literal(0), z.literal(7), z.literal(15), z.literal(30)]).optional(),
   /** null clears a due date. */

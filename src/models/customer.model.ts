@@ -9,6 +9,9 @@ const customerSchema = new Schema(
     aliases: { type: [String], default: [] },
     phone: { type: String, trim: true, default: '' },
     address: { type: String, trim: true, default: '' },
+    /** B2B bills: buyer's GSTIN and state (other state = IGST). */
+    gstin: { type: String, trim: true, uppercase: true, default: '' },
+    stateCode: { type: String, trim: true, default: '' },
     creditLimit: { type: Number, min: 0 },
     /** Cached from the ledger, in paise. Positive = customer owes the shop. */
     currentBalance: { type: Number, default: 0 },

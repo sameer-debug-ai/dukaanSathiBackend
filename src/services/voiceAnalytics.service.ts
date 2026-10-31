@@ -2,7 +2,7 @@ import type { Types } from 'mongoose';
 import type { AnalyticsFn, AnalyticsPeriod, AnalyticsRequest } from '../ai/intentSchema';
 import { Customer } from '../models/customer.model';
 import { CustomerLedger } from '../models/customerLedger.model';
-import { Sale } from '../models/sale.model';
+import { NOT_CANCELLED, Sale } from '../models/sale.model';
 import { addDays, endOfIstDay, istDayKey, parseIstDay, startOfIstDay } from '../utils/istDate';
 import { formatInr } from '../utils/money';
 import { profitReport } from './report.service';
@@ -118,7 +118,7 @@ const qty = (n: number) => Math.round(n * 1000) / 1000;
 
 async function productSales(shopId: Types.ObjectId, r: DateRange) {
   return Sale.aggregate<{ _id: Types.ObjectId; name: string; unit: string; qty: number; revenue: number }>([
-    { $match: { shopId, date: range(r) } },
+    { $match: { shopId, ...NOT_CANCELLED, date: range(r) } },
     { $unwind: '$items' },
     { $group: { _id: '$items.productId', name: { $first: '$items.name' }, unit: { $first: '$items.unit' }, qty: { $sum: '$items.qty' }, revenue: { $sum: '$items.total' } } },
     { $sort: { revenue: -1, name: 1 } },
@@ -127,7 +127,7 @@ async function productSales(shopId: Types.ObjectId, r: DateRange) {
 
 async function salesTotal(shopId: Types.ObjectId, r: DateRange) {
   const [s] = await Sale.aggregate<{ total: number; bills: number }>([
-    { $match: { shopId, date: range(r) } },
+    { $match: { shopId, ...NOT_CANCELLED, date: range(r) } },
     { $group: { _id: null, total: { $sum: '$totalAmount' }, bills: { $sum: 1 } } },
   ]);
   return { total: s?.total ?? 0, bills: s?.bills ?? 0 };

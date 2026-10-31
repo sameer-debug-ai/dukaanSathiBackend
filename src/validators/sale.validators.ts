@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { SALE_PAYMENT_MODES } from '../models/sale.model';
-import { dateRangeQuery, listQuery, objectId, optionalDate, paise, qty, trimmed } from './common';
+import { dateRangeQuery, gstinOptional, listQuery, stateCodeOptional, objectId, optionalDate, paise, qty, trimmed } from './common';
 
 export const createSaleSchema = z.object({
   customerId: objectId.optional().or(z.literal('').transform(() => undefined)),
@@ -25,11 +25,19 @@ export const createSaleSchema = z.object({
   source: z.enum(['manual', 'voice']).default('manual'),
   /** Set when the voice assistant saves this; lets the entry be undone. */
   voiceLogId: objectId.optional(),
+  /** GST shops, B2B: buyer's name / GSTIN / state when not taken from the customer. */
+  buyerName: trimmed(100).optional(),
+  buyerGstin: gstinOptional.optional(),
+  buyerStateCode: stateCodeOptional.optional(),
 });
+
+/** Billing screen preview: same body, nothing saved. */
+export const quoteSaleSchema = createSaleSchema.pick({ customerId: true, items: true, discount: true, buyerName: true, buyerGstin: true, buyerStateCode: true });
 
 export const saleListQuery = listQuery.merge(dateRangeQuery).extend({
   customerId: objectId.optional(),
   paymentMode: z.enum(SALE_PAYMENT_MODES).optional(),
+  status: z.enum(['active', 'cancelled']).optional(),
 });
 
 export type CreateSaleInput = z.infer<typeof createSaleSchema>;

@@ -25,6 +25,11 @@ const productSchema = new Schema(
     trackExpiry: { type: Boolean, default: false },
     imageUrl: { type: String, trim: true },
     supplierId: { type: Schema.Types.ObjectId, ref: 'Supplier' },
+    /** GST (used only when the shop has GST on). */
+    hsnCode: { type: String, trim: true, default: '' },
+    gstRate: { type: Number, default: 0, min: 0, max: 100 },
+    /** Selling price already includes GST (MRP style). */
+    priceIncludesGst: { type: Boolean, default: true },
     isActive: { type: Boolean, default: true },
     isDeleted: { type: Boolean, default: false },
   },

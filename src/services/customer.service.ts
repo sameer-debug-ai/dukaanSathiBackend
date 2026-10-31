@@ -62,14 +62,15 @@ export async function customerDetail(shopId: Types.ObjectId, id: string) {
   const customer = await getCustomer(shopId, id);
   const stats = await CustomerLedger.aggregate<{ _id: string; total: number; count: number }>([
     { $match: { shopId, customerId: customer._id } },
-    { $group: { _id: '$type', total: { $sum: '$amount' }, count: { $sum: 1 } } },
+    // A cancelled bill's udhaar coming back counts against the udhaar given, not as a payment.
+    { $group: { _id: { $cond: [{ $ne: [{ $ifNull: ['$reversalOf', null] }, null] }, 'reversal', '$type'] }, total: { $sum: '$amount' }, count: { $sum: 1 } } },
   ]);
   const by = (t: string) => stats.find((s) => s._id === t);
   return {
     ...customer.toJSON(),
     credit: await creditScoreOf(shopId, customer._id),
     stats: {
-      totalCredit: by('credit')?.total ?? 0,
+      totalCredit: (by('credit')?.total ?? 0) - (by('reversal')?.total ?? 0),
       totalPaid: by('payment')?.total ?? 0,
       entries: (by('credit')?.count ?? 0) + (by('payment')?.count ?? 0),
     },

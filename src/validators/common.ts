@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 import { z } from 'zod';
+import { GST_STATES, isValidGstin } from '../utils/gst';
 
 export const objectId = z
   .string()
@@ -46,6 +47,19 @@ export const dateRangeQuery = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
     .optional(),
 });
+
+/** Optional GSTIN: '' or a valid one (format, state code and check character). */
+export const gstinOptional = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .refine((v) => v === '' || isValidGstin(v), 'Enter a valid 15-character GSTIN, e.g. 27ABCDE1234F1Z5');
+
+/** Optional two-digit GST state code ('' = not given). */
+export const stateCodeOptional = z
+  .string()
+  .trim()
+  .refine((v) => v === '' || v in GST_STATES, 'Choose a valid state');
 
 export const indianPhoneOptional = z
   .string()

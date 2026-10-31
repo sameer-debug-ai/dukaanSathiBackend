@@ -2,7 +2,7 @@ import type { Types } from 'mongoose';
 import { Customer } from '../models/customer.model';
 import { CustomerLedger } from '../models/customerLedger.model';
 import { Purchase } from '../models/purchase.model';
-import { Sale } from '../models/sale.model';
+import { NOT_CANCELLED, Sale } from '../models/sale.model';
 import { Supplier } from '../models/supplier.model';
 import { SupplierPayment } from '../models/supplierPayment.model';
 import { IST_TIMEZONE, addDays, endOfIstDay, istDayKey, startOfIstDay } from '../utils/istDate';
@@ -31,7 +31,7 @@ export async function dashboardSummary(shopId: Types.ObjectId) {
   const today = { $gte: from, $lte: to };
 
   const [sales, udhaar, payments, outstanding, payable, alerts, topDebtors, recent] = await Promise.all([
-    sumOf(Sale.aggregate([{ $match: { shopId, date: today } }, { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } }])),
+    sumOf(Sale.aggregate([{ $match: { shopId, ...NOT_CANCELLED, date: today } }, { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } }])),
     sumOf(
       CustomerLedger.aggregate([
         { $match: { shopId, type: 'credit', date: today } },
@@ -40,7 +40,7 @@ export async function dashboardSummary(shopId: Types.ObjectId) {
     ),
     sumOf(
       CustomerLedger.aggregate([
-        { $match: { shopId, type: 'payment', date: today } },
+        { $match: { shopId, type: 'payment', date: today, reversalOf: { $exists: false } } },
         { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
       ]),
     ),
@@ -151,11 +151,11 @@ export async function dashboardCharts(shopId: Types.ObjectId, days: number) {
 
   const [salesByDay, topProducts, ledgerByDay] = await Promise.all([
     Sale.aggregate<{ _id: string; total: number; count: number }>([
-      { $match: { shopId, date: range } },
+      { $match: { shopId, ...NOT_CANCELLED, date: range } },
       { $group: { _id: dayExpr, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } },
     ]),
     Sale.aggregate<{ _id: string; name: string; qty: number; total: number; unit: string }>([
-      { $match: { shopId, date: range } },
+      { $match: { shopId, ...NOT_CANCELLED, date: range } },
       { $unwind: '$items' },
       {
         $group: {
@@ -170,7 +170,7 @@ export async function dashboardCharts(shopId: Types.ObjectId, days: number) {
       { $limit: 5 },
     ]),
     CustomerLedger.aggregate<{ _id: { day: string; type: string }; total: number }>([
-      { $match: { shopId, date: range } },
+      { $match: { shopId, date: range, reversalOf: { $exists: false } } },
       { $group: { _id: { day: dayExpr, type: '$type' }, total: { $sum: '$amount' } } },
     ]),
   ]);
